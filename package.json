@@ -1,0 +1,50 @@
+{
+  "name": "cognigy-a2a-gateway",
+  "version": "0.1.0",
+  "description": "A2A Protocol gateway bridging external A2A consumers to Cognigy.AI REST and Socket endpoints",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "build:check": "tsc --noEmit",
+    "start": "node dist/index.js",
+    "dev": "nodemon --watch src --ext ts --exec ts-node src/index.ts",
+    "test": "jest --passWithNoTests",
+    "test:coverage": "jest --coverage --passWithNoTests",
+    "test:watch": "jest --watch --passWithNoTests",
+    "lint": "eslint src tests --ext .ts",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "a2a",
+    "cognigy",
+    "gateway",
+    "agent",
+    "protocol"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "dependencies": {
+    "@a2a-js/sdk": "^0.3.10",
+    "@cognigy/socket-client": "^4.9.2",
+    "axios": "^1.13.5",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "pino": "^10.3.1",
+    "pino-pretty": "^13.1.3",
+    "uuid": "^11.1.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^24.0.0",
+    "@types/uuid": "^10.0.0",
+    "axios-mock-adapter": "^2.1.0",
+    "jest": "^30.2.0",
+    "nodemon": "^3.1.14",
+    "ts-jest": "^29.4.6",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  }
+}

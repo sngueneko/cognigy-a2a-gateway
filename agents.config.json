@@ -1,0 +1,38 @@
+{
+  "agents": [
+    {
+      "id": "booking-agent",
+      "name": "Booking Assistant",
+      "description": "Handles flight and hotel bookings using an agentic Cognigy flow with multi-turn conversation support.",
+      "version": "1.0.0",
+      "endpointType": "SOCKET",
+      "endpointUrl": "${COGNIGY_BOOKING_URL}",
+      "urlToken": "${COGNIGY_BOOKING_TOKEN}",
+      "skills": [
+        {
+          "id": "booking",
+          "name": "Travel Booking",
+          "description": "Book flights, hotels, and rental cars",
+          "tags": ["booking", "travel", "flights", "hotels"]
+        }
+      ]
+    },
+    {
+      "id": "faq-agent",
+      "name": "FAQ Assistant",
+      "description": "Answers frequently asked questions using a synchronous Cognigy REST endpoint.",
+      "version": "1.0.0",
+      "endpointType": "REST",
+      "endpointUrl": "${COGNIGY_FAQ_URL}",
+      "urlToken": "${COGNIGY_FAQ_TOKEN}",
+      "skills": [
+        {
+          "id": "faq",
+          "name": "FAQ",
+          "description": "Answer product and service questions",
+          "tags": ["faq", "support", "knowledge-base"]
+        }
+      ]
+    }
+  ]
+}
