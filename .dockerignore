@@ -1,0 +1,26 @@
+# Dependencies — reinstalled inside the image
+node_modules/
+
+# TypeScript output — rebuilt inside the image
+dist/
+
+# Test artefacts
+coverage/
+
+# Local environment — never bake secrets into the image
+.env
+.env.*
+!.env.example
+
+# Dev / editor files
+.git/
+.gitignore
+*.md
+!README.md
+.vscode/
+.idea/
+*.log
+
+# Test files — not needed at runtime
+tests/
+jest.config.ts

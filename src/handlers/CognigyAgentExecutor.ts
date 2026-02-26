@@ -93,6 +93,8 @@ export class CognigyAgentExecutor implements AgentExecutor {
       // RestAdapter ignores onOutput — it returns all outputs at once.
       const artifactId = uuidv4();
       let outputCount = 0;
+      // Buffer published artifact events so we can mark the last one lastChunk:true
+      const publishedArtifacts: TaskArtifactUpdateEvent[] = [];
 
       const onOutput: OutputCallback = (output: CognigyBaseOutput, index: number) => {
         if (controller.signal.aborted) return;
@@ -109,10 +111,11 @@ export class CognigyAgentExecutor implements AgentExecutor {
             parts: parts as Part[],
           },
           append: false,
-          lastChunk: false,
+          lastChunk: false, // will be corrected for the final artifact below
         };
 
         eventBus.publish(event);
+        publishedArtifacts.push(event);
         outputCount++;
 
         log.debug(
@@ -138,6 +141,20 @@ export class CognigyAgentExecutor implements AgentExecutor {
       }
 
       if (isSocket) {
+        // Mark the last artifact as lastChunk:true now that we know it's the last one
+        const lastArtifact = publishedArtifacts[publishedArtifacts.length - 1];
+        if (lastArtifact) {
+          const finalArtifact: TaskArtifactUpdateEvent = {
+            ...lastArtifact,
+            lastChunk: true,
+          };
+          eventBus.publish(finalArtifact);
+          log.debug(
+            { agentId: this.agentId, taskId, artifactId: lastArtifact.artifact.artifactId, event: 'artifact.final' },
+            'Published final artifact (lastChunk:true)',
+          );
+        }
+
         // SOCKET: close the task with a completed status — no Message needed
         this.publishCompleted(eventBus, taskId, contextId);
       } else {

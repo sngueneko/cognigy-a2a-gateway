@@ -1,0 +1,168 @@
+# ╔══════════════════════════════════════════════════════════════════════════════╗
+# ║           Cognigy A2A Platform — Docker Compose                             ║
+# ║                                                                              ║
+# ║  Services:                                                                   ║
+# ║    gateway   — A2A JSON-RPC gateway (always started)                         ║
+# ║    webchat   — React chat UI (always started)                                ║
+# ║    redis     — Task store backend (--profile redis)                          ║
+# ║                                                                              ║
+# ║  Profiles:                                                                   ║
+# ║    (default)       gateway + webchat, memory task store                      ║
+# ║    --profile redis gateway + webchat + Redis                                 ║
+# ║                                                                              ║
+# ║  Quick start:                                                                ║
+# ║    cp .env.example .env.docker && vi .env.docker                             ║
+# ║    docker compose --env-file .env.docker up --build                          ║
+# ║                                                                              ║
+# ║  With Redis:                                                                 ║
+# ║    docker compose --env-file .env.docker --profile redis up --build          ║
+# ║                                                                              ║
+# ║  Open the chat UI at:  http://localhost:8080                                 ║
+# ║  Gateway API at:       http://localhost:3000                                 ║
+# ╚══════════════════════════════════════════════════════════════════════════════╝
+
+services:
+
+  # ── Gateway ──────────────────────────────────────────────────────────────────
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: cognigy-a2a-gateway:latest
+    container_name: cognigy-a2a-gateway
+    restart: unless-stopped
+
+    ports:
+      # Expose the A2A JSON-RPC API on the host.
+      # Only needed if you want to curl the gateway directly.
+      # The webchat accesses it via the internal Docker network (no host port needed).
+      - "${GATEWAY_HOST_PORT:-3000}:${PORT:-3000}"
+
+    volumes:
+      - ./agents.config.json:/app/agents.config.json:ro
+
+    environment:
+      NODE_ENV: production
+      PORT: ${PORT:-3000}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      LOG_PRETTY: ${LOG_PRETTY:-false}
+      AGENTS_CONFIG_PATH: /app/agents.config.json
+      TASK_STORE_TYPE: ${TASK_STORE_TYPE:-memory}
+      TASK_STORE_REDIS_URL: ${TASK_STORE_REDIS_URL:-redis://redis:6379}
+      TASK_STORE_REDIS_TTL_S: ${TASK_STORE_REDIS_TTL_S:-3600}
+      TASK_STORE_REDIS_PREFIX: ${TASK_STORE_REDIS_PREFIX:-a2a:task:}
+      # Cognigy credentials — set in .env.docker
+      COGNIGY_BOOKING_URL: ${COGNIGY_BOOKING_URL}
+      COGNIGY_BOOKING_TOKEN: ${COGNIGY_BOOKING_TOKEN}
+      COGNIGY_FAQ_URL: ${COGNIGY_FAQ_URL}
+      COGNIGY_FAQ_TOKEN: ${COGNIGY_FAQ_TOKEN}
+
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:${PORT:-3000}/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+
+    depends_on:
+      redis:
+        condition: service_healthy
+        required: false
+
+    networks:
+      - gateway-net
+
+  # ── Webchat UI ───────────────────────────────────────────────────────────────
+
+  webchat:
+    build:
+      context: ../webchat-ui
+      dockerfile: ../webchat-ui/Dockerfile
+    image: cognigy-a2a-webchat:latest
+    container_name: cognigy-a2a-webchat
+    restart: unless-stopped
+
+    ports:
+      # Browser opens http://localhost:8080
+      - "${WEBCHAT_HOST_PORT:-8080}:80"
+
+    environment:
+      # ══════════════════════════════════════════════════════════════════════
+      # HOW ROUTING WORKS
+      # ══════════════════════════════════════════════════════════════════════
+      #
+      # The webchat is a browser SPA — all API calls come from the USER'S
+      # BROWSER, not from inside Docker.  There are two routing modes:
+      #
+      # ── MODE A: nginx proxy (recommended, default) ─────────────────────
+      #   Leave VITE_GATEWAY_URL empty (or unset).
+      #   The browser calls  http://localhost:8080/api/...
+      #   nginx proxies that internally to  http://gateway:3000/...
+      #   → Same origin from the browser's perspective → NO CORS issues.
+      #   Works out of the box with the default docker-compose setup.
+      #
+      # ── MODE B: direct URL ────────────────────────────────────────────
+      #   Set VITE_GATEWAY_URL to a URL the browser can reach, e.g.
+      #     VITE_GATEWAY_URL=http://localhost:3000     (local dev)
+      #     VITE_GATEWAY_URL=https://a2a.example.com  (production)
+      #   The browser calls that URL directly.
+      #   → Requires CORS to be enabled on the gateway (it is, by default).
+      #   Use this when gateway and webchat are on different hostnames/ports.
+      #
+      # DEFAULT: empty → MODE A (nginx proxy, no CORS)
+      VITE_GATEWAY_URL: ${VITE_GATEWAY_URL:-}
+
+      # Internal Docker network URL for the nginx proxy (MODE A).
+      # Must match the gateway service name and PORT above.
+      GATEWAY_PROXY_PASS: http://gateway:${PORT:-3000}
+
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+    depends_on:
+      gateway:
+        condition: service_healthy
+
+    networks:
+      - gateway-net
+
+  # ── Redis (optional — activate with --profile redis) ─────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: cognigy-a2a-redis
+    profiles:
+      - redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --save 60 1
+      --loglevel warning
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+
+    volumes:
+      - redis-data:/data
+
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      start_period: 5s
+      retries: 5
+
+    networks:
+      - gateway-net
+
+# ── Volumes ──────────────────────────────────────────────────────────────────
+volumes:
+  redis-data:
+    driver: local
+
+# ── Networks ─────────────────────────────────────────────────────────────────
+networks:
+  gateway-net:
+    driver: bridge

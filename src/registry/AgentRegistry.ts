@@ -93,7 +93,7 @@ export class AgentRegistry {
       version: config.version,
       url: `${baseUrl}/agents/${config.id}/`,
       capabilities: {
-        streaming: true,
+        streaming: config.endpointType === 'SOCKET',
         pushNotifications: false,
         stateTransitionHistory: false,
       },

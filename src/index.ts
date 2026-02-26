@@ -20,6 +20,7 @@
 
 import 'dotenv/config';
 import express from 'express';
+import cors from 'cors';
 import {
   agentCardHandler,
   jsonRpcHandler,
@@ -36,6 +37,21 @@ const log = logger.child({ component: 'Server' });
 
 async function bootstrap(): Promise<void> {
   const app = express();
+
+  // ── CORS ──────────────────────────────────────────────────────────────────
+  // Allow any origin by default so the webchat (and any A2A client) can reach
+  // the gateway regardless of how it is deployed.  Restrict via CORS_ORIGIN env
+  // var in production:  CORS_ORIGIN=https://chat.mycompany.com
+  const allowedOrigin = process.env['CORS_ORIGIN'] ?? '*';
+  app.use(cors({
+    origin: allowedOrigin,
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+    // SSE requires the browser to read the response body as it streams
+    exposedHeaders: ['Content-Type'],
+    credentials: allowedOrigin !== '*',
+  }));
+
   app.use(express.json());
 
   const registry = new AgentRegistry();
