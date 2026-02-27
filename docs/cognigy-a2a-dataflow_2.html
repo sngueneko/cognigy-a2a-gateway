@@ -1,0 +1,713 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<title>Cognigy A2A Gateway — End-to-End Dataflow + Socket Connection Management</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Syne:wght@500;700;800&display=swap');
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#06090f;--s1:#0c1220;
+  --border:#1c2d47;
+  --blue:#4f9cf9;--cyan:#22d3ee;--green:#34d399;
+  --orange:#fb923c;--purple:#a78bfa;--red:#f87171;--amber:#fbbf24;
+  --lime:#a3e635;
+  --txt:#c8d6ef;--muted:#4a6080;--dim:#7a96b8;
+}
+body{background:var(--bg);color:var(--txt);font-family:'IBM Plex Mono',monospace;padding:28px 20px 80px;overflow-x:auto}
+
+.hdr{max-width:1200px;margin:0 auto 36px}
+.hdr h1{font-family:'Syne',sans-serif;font-size:22px;font-weight:800;color:#fff;letter-spacing:-.5px}
+.hdr p{font-size:10px;color:var(--muted);letter-spacing:2.5px;text-transform:uppercase;margin-top:4px}
+
+/* TAB NAV */
+.tabs{max-width:1200px;margin:0 auto 28px;display:flex;gap:4px;flex-wrap:wrap}
+.tab{font-size:9.5px;font-weight:700;padding:7px 16px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;letter-spacing:1px;text-transform:uppercase;transition:all .2s}
+.tab:hover{border-color:#2a4060;color:var(--txt)}
+.tab.active{background:#0f1f35;border-color:var(--blue);color:var(--blue)}
+.tab.active-amber{background:#1a1000;border-color:var(--amber);color:var(--amber)}
+
+.panel{display:none;max-width:1200px;margin:0 auto;animation:fadeIn .3s}
+.panel.active{display:block}
+@keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+/* ── FLOW STEP CARDS ── */
+.flow{display:flex;flex-direction:column;gap:0}
+.step{display:grid;grid-template-columns:64px 1fr;gap:0;opacity:0;transform:translateX(-10px);animation:slideIn .4s forwards}
+@keyframes slideIn{to{opacity:1;transform:none}}
+.step:nth-child(1){animation-delay:.04s}.step:nth-child(2){animation-delay:.10s}
+.step:nth-child(3){animation-delay:.16s}.step:nth-child(4){animation-delay:.22s}
+.step:nth-child(5){animation-delay:.28s}.step:nth-child(6){animation-delay:.34s}
+.step:nth-child(7){animation-delay:.40s}.step:nth-child(8){animation-delay:.46s}
+.step:nth-child(9){animation-delay:.52s}.step:nth-child(10){animation-delay:.58s}
+
+.step-num-col{display:flex;flex-direction:column;align-items:center;padding-top:16px}
+.step-num{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;font-family:'Syne',sans-serif;border:2px solid;flex-shrink:0}
+.step-line{width:1px;flex:1;min-height:16px;margin-top:6px}
+.step:last-child .step-line{display:none}
+
+.step-body{padding:12px 0 12px 14px;border-bottom:1px solid #0d1a28}
+.step:last-child .step-body{border-bottom:none}
+.step-actor{font-size:9px;letter-spacing:2px;text-transform:uppercase;margin-bottom:5px;font-weight:700}
+.step-title{font-size:13px;font-weight:700;color:#fff;margin-bottom:8px;letter-spacing:-.2px}
+.step-desc{font-size:10.5px;color:var(--dim);line-height:1.65;margin-bottom:8px}
+.step-desc:last-child{margin-bottom:0}
+
+code{font-size:9.5px;color:var(--cyan);background:#071520;padding:1px 5px;border-radius:3px}
+
+.code-block{background:#07111e;border:1px solid #1a2d47;border-radius:8px;padding:12px 14px;font-size:9.5px;line-height:1.7;margin-top:8px;overflow-x:auto}
+.code-block .k{color:#a78bfa}.code-block .s{color:#34d399}.code-block .v{color:#fb923c}.code-block .c{color:#4a6080}.code-block .e{color:#22d3ee}
+
+/* step color themes */
+.sn-blue{border-color:var(--blue);background:#0d1f38;color:var(--blue)}
+.sl-blue{background:linear-gradient(to bottom,var(--blue),transparent)}
+.sa-blue{color:var(--blue)}
+
+.sn-purple{border-color:var(--purple);background:#180d30;color:var(--purple)}
+.sl-purple{background:linear-gradient(to bottom,var(--purple),transparent)}
+.sa-purple{color:var(--purple)}
+
+.sn-orange{border-color:var(--orange);background:#1f1000;color:var(--orange)}
+.sl-orange{background:linear-gradient(to bottom,var(--orange),transparent)}
+.sa-orange{color:var(--orange)}
+
+.sn-amber{border-color:var(--amber);background:#1a1200;color:var(--amber)}
+.sl-amber{background:linear-gradient(to bottom,var(--amber),transparent)}
+.sa-amber{color:var(--amber)}
+
+.sn-green{border-color:var(--green);background:#071a10;color:var(--green)}
+.sl-green{background:linear-gradient(to bottom,var(--green),transparent)}
+.sa-green{color:var(--green)}
+
+.sn-cyan{border-color:var(--cyan);background:#041520;color:var(--cyan)}
+.sl-cyan{background:linear-gradient(to bottom,var(--cyan),transparent)}
+.sa-cyan{color:var(--cyan)}
+
+.sn-red{border-color:var(--red);background:#1a0707;color:var(--red)}
+.sl-red{background:linear-gradient(to bottom,var(--red),transparent)}
+.sa-red{color:var(--red)}
+
+.sn-lime{border-color:var(--lime);background:#0e1600;color:var(--lime)}
+.sl-lime{background:linear-gradient(to bottom,var(--lime),transparent)}
+.sa-lime{color:var(--lime)}
+
+/* pills */
+.pill{display:inline-block;font-size:8px;font-weight:700;padding:2px 7px;border-radius:100px;letter-spacing:.8px;text-transform:uppercase;margin:2px 3px 2px 0}
+.p-in{background:#0d2035;color:var(--blue);border:1px solid #1a3d6a}
+.p-out{background:#071a10;color:var(--green);border:1px solid #1a4a28}
+.p-warn{background:#1a1000;color:var(--amber);border:1px solid #3d2800}
+.p-code{background:#070e18;color:var(--cyan);border:1px solid #0d2035}
+.p-pool{background:#1a1000;color:var(--amber);border:1px solid #3d2a00}
+.p-err{background:#1a0505;color:var(--red);border:1px solid #3d1010}
+
+/* ── SOCKET MANAGEMENT PANEL ── */
+.sm-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px}
+.sm-card{background:#0c1015;border:1px solid var(--border);border-radius:12px;padding:18px}
+.sm-card-title{font-family:'Syne',sans-serif;font-size:13px;font-weight:700;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+.sm-card-body{font-size:10px;color:var(--dim);line-height:1.7}
+
+.state-machine{display:flex;flex-direction:column;gap:6px;margin-top:8px}
+.sm-state{display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:8px;border:1px solid}
+.sm-state-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.sm-state-name{font-weight:700;font-size:10px;min-width:100px;flex-shrink:0}
+.sm-state-desc{font-size:9.5px;color:var(--dim)}
+.sm-arrow{font-size:9px;color:var(--muted);padding:2px 0 2px 32px;display:flex;align-items:center;gap:6px}
+
+/* CONNECTING */
+.st-connecting{background:#070d1a;border-color:#1a3060;color:var(--blue)}
+.st-connecting .sm-state-dot{background:var(--blue)}
+/* IDLE */
+.st-idle{background:#060f09;border-color:#1a3d20;color:var(--green)}
+.st-idle .sm-state-dot{background:var(--green);animation:blink 2s infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+/* ACTIVE */
+.st-active{background:#120e00;border-color:#3d2800;color:var(--amber)}
+.st-active .sm-state-dot{background:var(--amber)}
+/* RECONNECTING */
+.st-reconn{background:#120700;border-color:#3a1a00;color:#ff7043}
+.st-reconn .sm-state-dot{background:#ff7043}
+/* DEAD */
+.st-dead{background:#110404;border-color:#3d1010;color:var(--red)}
+.st-dead .sm-state-dot{background:var(--red)}
+
+/* pool diagram */
+.pool-diagram{margin-top:10px}
+.pd-row{display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:9.5px}
+.pd-label{color:var(--muted);min-width:100px;flex-shrink:0}
+.pd-conn{height:24px;border-radius:4px;padding:0 10px;display:flex;align-items:center;font-size:9px;font-weight:700;letter-spacing:.5px;flex:1}
+.pd-sess{height:18px;border-radius:3px;padding:0 8px;display:flex;align-items:center;font-size:8.5px;margin-left:6px}
+.pd-active{background:#0a1f10;border:1px solid var(--green);color:var(--green)}
+.pd-idle{background:#0a0f18;border:1px solid var(--muted);color:var(--muted)}
+.pd-sess-a{background:#081510;border:1px solid #1a3d20;color:#94e8d0}
+.pd-sess-i{background:#080808;border:1px solid #222;color:#444}
+
+/* backoff */
+.backoff-diagram{display:flex;align-items:flex-end;gap:6px;margin-top:12px;padding:12px;background:#080e18;border-radius:8px;border:1px solid var(--border)}
+.bd-bar-group{display:flex;flex-direction:column;align-items:center;gap:3px;flex:1}
+.bd-bar{border-radius:3px 3px 0 0;width:100%}
+.bd-time{font-size:8px;color:var(--amber);text-align:center}
+.bd-att{font-size:8px;color:var(--muted);text-align:center}
+
+/* timeline */
+.timeline{display:flex;flex-direction:column;gap:0}
+.tl-item{display:flex;gap:12px;padding:10px 0;border-bottom:1px solid #0d1520;font-size:10px}
+.tl-item:last-child{border-bottom:none}
+.tl-time{width:70px;flex-shrink:0;color:var(--amber);font-size:9px;font-weight:700;padding-top:1px}
+.tl-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;margin-top:4px}
+.tl-body{flex:1}
+.tl-event{color:#fff;font-weight:600;font-size:10px;margin-bottom:2px}
+.tl-detail{color:var(--dim);font-size:9.5px;line-height:1.5}
+
+/* new badge */
+.new-badge{display:inline-block;font-size:7px;font-weight:700;padding:2px 6px;border-radius:3px;background:#3d2a00;color:var(--amber);letter-spacing:1.5px;text-transform:uppercase;vertical-align:middle;margin-left:6px}
+
+/* ── LIGHT MODE ── */
+html.light {
+  --bg:#f0f4f8;--s1:#e8edf4;
+  --border:#cbd5e1;
+  --blue:#1d4ed8;--cyan:#0e7490;--green:#047857;
+  --orange:#c2410c;--purple:#6d28d9;--red:#b91c1c;--amber:#92400e;--lime:#4d7c0f;
+  --txt:#1e293b;--muted:#64748b;--dim:#475569;
+}
+html.light body { background:var(--bg); color:var(--txt); }
+html.light .hdr h1 { color:#0f172a; }
+
+html.light .tabs { }
+html.light .tab { background:#fff; border-color:#e2e8f0; color:#64748b; }
+html.light .tab:hover { border-color:#94a3b8; color:#334155; }
+html.light .tab.active { background:#eff6ff; border-color:#1d4ed8; color:#1d4ed8; }
+html.light .tab.active-amber { background:#fffbeb; border-color:#d97706; color:#92400e; }
+
+html.light .panel { }
+
+/* Step numbers */
+html.light .sn-blue   { border-color:#3b82f6; background:#eff6ff; color:#1d4ed8; }
+html.light .sn-purple { border-color:#8b5cf6; background:#faf5ff; color:#6d28d9; }
+html.light .sn-orange { border-color:#f97316; background:#fff7ed; color:#c2410c; }
+html.light .sn-amber  { border-color:#f59e0b; background:#fffbeb; color:#92400e; }
+html.light .sn-green  { border-color:#22c55e; background:#f0fdf4; color:#15803d; }
+html.light .sn-cyan   { border-color:#06b6d4; background:#ecfeff; color:#0e7490; }
+html.light .sn-red    { border-color:#ef4444; background:#fff5f5; color:#b91c1c; }
+html.light .sn-lime   { border-color:#84cc16; background:#f7fee7; color:#4d7c0f; }
+
+/* Step lines */
+html.light .step-body { border-color:#e2e8f0; }
+html.light .step-title { color:#0f172a; }
+html.light .step-desc { color:#475569; }
+html.light code { color:#0e7490; background:#ecfeff; }
+html.light .code-block { background:#f8fafc; border-color:#e2e8f0; color:#1e293b; }
+html.light .code-block .k { color:#6d28d9; }
+html.light .code-block .s { color:#15803d; }
+html.light .code-block .v { color:#c2410c; }
+html.light .code-block .c { color:#94a3b8; }
+html.light .code-block .e { color:#0e7490; }
+
+html.light .pill.p-in   { background:#eff6ff; color:#1d4ed8; border-color:#bfdbfe; }
+html.light .pill.p-out  { background:#f0fdf4; color:#15803d; border-color:#86efac; }
+html.light .pill.p-warn { background:#fffbeb; color:#92400e; border-color:#fde68a; }
+html.light .pill.p-code { background:#ecfeff; color:#0e7490; border-color:#a5f3fc; }
+html.light .pill.p-pool { background:#fffbeb; color:#92400e; border-color:#fde68a; }
+html.light .pill.p-err  { background:#fff5f5; color:#b91c1c; border-color:#fecaca; }
+
+/* Socket mgmt panel */
+html.light .sm-card { background:#fff; border-color:#e2e8f0; }
+html.light .sm-card-body { color:#475569; }
+html.light .sm-state-desc { color:#475569; }
+html.light .sm-arrow { color:#94a3b8; }
+
+html.light .st-connecting { background:#eff6ff; border-color:#93c5fd; color:#1d4ed8; }
+html.light .st-idle       { background:#f0fdf4; border-color:#86efac; color:#15803d; }
+html.light .st-active     { background:#fffbeb; border-color:#fde68a; color:#92400e; }
+html.light .st-reconn     { background:#fff5f0; border-color:#fdba74; color:#c2410c; }
+html.light .st-dead       { background:#fff5f5; border-color:#fca5a5; color:#b91c1c; }
+
+html.light .pool-diagram .pd-conn.pd-active { background:#f0fdf4; border-color:#86efac; color:#15803d; }
+html.light .pool-diagram .pd-conn.pd-idle   { background:#f8fafc; border-color:#e2e8f0; color:#94a3b8; }
+html.light .pool-diagram .pd-sess.pd-sess-a { background:#ecfeff; border-color:#a5f3fc; color:#0e7490; }
+html.light .pool-diagram .pd-sess.pd-sess-i { background:#f8fafc; border-color:#e2e8f0; color:#cbd5e1; }
+html.light .pool-diagram .pd-label { color:#475569; }
+
+html.light .backoff-diagram { background:#f8fafc; border-color:#e2e8f0; }
+
+html.light .timeline .tl-item { border-color:#e2e8f0; }
+html.light .tl-time  { color:#92400e; }
+html.light .tl-event { color:#0f172a; }
+html.light .tl-detail{ color:#475569; }
+
+/* ── TOGGLE BUTTON ── */
+#theme-toggle {
+  position:fixed;top:18px;right:22px;z-index:1000;
+  background:var(--s1);border:1px solid var(--border);
+  border-radius:100px;padding:6px 14px 6px 10px;
+  display:flex;align-items:center;gap:7px;cursor:pointer;
+  font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:700;
+  color:var(--txt);letter-spacing:.5px;
+  transition:all .25s;box-shadow:0 2px 12px rgba(0,0,0,.2);
+}
+#theme-toggle:hover { transform:translateY(-1px); box-shadow:0 4px 20px rgba(0,0,0,.3); }
+#theme-toggle .ico { font-size:14px; line-height:1; }
+html.light #theme-toggle { background:#fff; box-shadow:0 2px 12px rgba(0,0,0,.1); }
+
+</style>
+</head>
+<body>
+
+<button id="theme-toggle" onclick="toggleTheme()" title="Light/Dark Mode umschalten">
+  <span class="ico" id="toggle-ico">☀️</span>
+  <span id="toggle-lbl">Light Mode</span>
+</button>
+<script>
+(function(){
+  const saved = localStorage.getItem('theme') || 'dark';
+  if(saved === 'light') { document.documentElement.classList.add('light'); updateBtn('light'); }
+  function updateBtn(t){
+    const ico = document.getElementById('toggle-ico');
+    const lbl = document.getElementById('toggle-lbl');
+    if(!ico || !lbl) return;
+    if(t==='light'){ ico.textContent='🌙'; lbl.textContent='Dark Mode'; }
+    else { ico.textContent='☀️'; lbl.textContent='Light Mode'; }
+  }
+  window.toggleTheme = function(){
+    const isLight = document.documentElement.classList.toggle('light');
+    const t = isLight ? 'light' : 'dark';
+    localStorage.setItem('theme', t);
+    updateBtn(t);
+  };
+})();
+</script>
+
+<div class="hdr">
+  <h1>Cognigy A2A Gateway — End-to-End Dataflow</h1>
+  <p>Vollständiger Nachrichtenfluss + Socket Connection Management</p>
+</div>
+
+<!-- TABS -->
+<div class="tabs">
+  <button class="tab active" onclick="showPanel('flow-rest', this)">REST Flow</button>
+  <button class="tab" onclick="showPanel('flow-socket', this)">Socket Flow (Agentic)</button>
+  <button class="tab active-amber" onclick="showPanel('socket-mgmt', this)" style="border-color:#3d2800;color:var(--amber)">⚡ Socket Connection Management</button>
+</div>
+
+<!-- ═══════════════════════════════════════ PANEL: REST FLOW ═══ -->
+<div class="panel active" id="flow-rest">
+<div class="flow">
+
+  <div class="step">
+    <div class="step-num-col"><div class="step-num sn-blue">1</div><div class="step-line sl-blue"></div></div>
+    <div class="step-body">
+      <div class="step-actor sa-blue">A2A Client → Gateway</div>
+      <div class="step-title">A2A Request — POST /agents/billing-agent/a2a</div>
+      <div class="step-desc">Der Consumer sendet einen JSON-RPC Request. contextId identifiziert die Konversation, das Gateway erkennt aus der Registry: endpointType = "REST".</div>
+      <div class="code-block">
+<span class="k">POST</span> /agents/billing-agent/a2a<br>
+{<br>
+&nbsp;&nbsp;<span class="e">contextId</span>: <span class="s">"ctx-invoice-42"</span>,<br>
+&nbsp;&nbsp;<span class="e">message</span>: { <span class="e">parts</span>: [{ <span class="e">kind</span>: <span class="s">"text"</span>, <span class="e">text</span>: <span class="s">"Zeig mir Rechnung #8821"</span> }] }<br>
+}
+      </div>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num-col"><div class="step-num sn-purple">2</div><div class="step-line sl-purple"></div></div>
+    <div class="step-body">
+      <div class="step-actor sa-purple">Gateway — Registry Lookup</div>
+      <div class="step-title">Agent Registry → REST Adapter gewählt</div>
+      <div class="step-desc">Session Store: <code>cognigy.sessionId = "ctx-invoice-42"</code>. Adapter: <code>RestAdapter</code> mit axios. Kein Connection Management nötig.</div>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num-col"><div class="step-num sn-orange">3</div><div class="step-line sl-orange"></div></div>
+    <div class="step-body">
+      <div class="step-actor sa-orange">Gateway → Cognigy REST</div>
+      <div class="step-title">HTTP POST → Cognigy Standalone Flow</div>
+      <div class="step-desc">axios sendet synchronen Request. Timeout: 8 Sekunden. Cognigy verarbeitet den Flow deterministisch und gibt alle Outputs in <code>outputStack[]</code> zurück.</div>
+      <div class="code-block">
+<span class="k">POST</span> https://endpoint.cognigy.ai/abc123<br>
+{ <span class="e">userId</span>: <span class="s">"a2a-gateway"</span>, <span class="e">sessionId</span>: <span class="s">"ctx-invoice-42"</span>,<br>
+&nbsp;&nbsp;<span class="e">text</span>: <span class="s">"Zeig mir Rechnung #8821"</span> }<br><br>
+<span class="c">← Response:</span><br>
+{ <span class="e">outputStack</span>: [<br>
+&nbsp;&nbsp;{ <span class="e">text</span>: <span class="s">"Rechnung #8821 vom 15.01.2025: 1.240,00 €"</span>, <span class="e">data</span>: {} }<br>
+]}
+      </div>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num-col"><div class="step-num sn-cyan">4</div><div class="step-line sl-cyan"></div></div>
+    <div class="step-body">
+      <div class="step-actor sa-cyan">Gateway — Output Normalizer</div>
+      <div class="step-title">outputStack[] → A2A Parts normalisiert</div>
+      <div class="step-desc">Jeder Output wird normalisiert. text vorhanden → TextPart direkt. Fertig.</div>
+      <div class="code-block">
+<span class="c">// Normalizer Output</span><br>
+[{ <span class="e">kind</span>: <span class="s">"text"</span>, <span class="e">text</span>: <span class="s">"Rechnung #8821 vom 15.01.2025: 1.240,00 €"</span> }]
+      </div>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num-col"><div class="step-num sn-green">5</div><div class="step-line sl-green"></div></div>
+    <div class="step-body">
+      <div class="step-actor sa-green">Gateway → A2A Client</div>
+      <div class="step-title">A2A Response mit Status "completed"</div>
+      <div class="step-desc">Ein einziger SSE-Block, Task sofort completed. Gesamtlatenz: Cognigy Flow-Zeit + Normalizer (typisch 1–4s).</div>
+      <div class="code-block">
+<span class="e">data</span>: { <span class="e">kind</span>: <span class="s">"message"</span>, <span class="e">parts</span>: [{ <span class="e">kind</span>: <span class="s">"text"</span>, <span class="e">text</span>: <span class="s">"Rechnung #8821..."</span> }] }<br>
+<span class="e">data</span>: { <span class="e">kind</span>: <span class="s">"status"</span>, <span class="e">status</span>: { <span class="e">state</span>: <span class="s">"completed"</span> }, <span class="e">final</span>: <span class="k">true</span> }
+      </div>
+    </div>
+  </div>
+
+</div>
+</div>
+
+<!-- ═══════════════════════════════════════ PANEL: SOCKET FLOW ═══ -->
+<div class="panel" id="flow-socket">
+<div class="flow">
+
+  <div class="step">
+    <div class="step-num-col"><div class="step-num sn-blue">1</div><div class="step-line sl-blue"></div></div>
+    <div class="step-body">
+      <div class="step-actor sa-blue">A2A Client → Gateway</div>
+      <div class="step-title">A2A Request — POST /agents/booking-agent/a2a</div>
+      <div class="step-desc">Consumer sendet Anfrage. Gateway erkennt via Registry: endpointType = "SOCKET" → Socket Adapter + Connection Pool werden aktiviert.</div>
+      <div class="code-block">
+{ <span class="e">contextId</span>: <span class="s">"ctx-abc123"</span>, <span class="e">message</span>: { <span class="e">parts</span>: [{ <span class="e">kind</span>: <span class="s">"text"</span>,<br>
+&nbsp;&nbsp;<span class="e">text</span>: <span class="s">"Buche Flug nach Berlin am 15.03"</span> }] } }
+      </div>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num-col"><div class="step-num sn-amber">2</div><div class="step-line sl-amber"></div></div>
+    <div class="step-body">
+      <div class="step-actor sa-amber">Gateway — Connection Pool</div>
+      <div class="step-title">Pool Lookup: Existiert Connection für "booking-agent"?</div>
+      <div class="step-desc">
+        Der <strong style="color:#fbbf24">SocketConnectionPool</strong> prüft ob eine aktive Verbindung für diesen Agent-Endpoint existiert.
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px">
+        <div style="background:#060f09;border:1px solid #1a3d20;border-radius:6px;padding:10px;font-size:9.5px">
+          <div style="color:var(--green);font-weight:700;margin-bottom:4px">✓ Connection EXISTS (IDLE/ACTIVE)</div>
+          <div style="color:var(--dim)">→ Direkt wiederverwenden<br>→ <code>sendMessage()</code> über bestehende WS<br>→ sessionId = "ctx-abc123" als Key</div>
+        </div>
+        <div style="background:#100800;border:1px solid #3d2000;border-radius:6px;padding:10px;font-size:9.5px">
+          <div style="color:var(--orange);font-weight:700;margin-bottom:4px">✗ Connection NOT FOUND</div>
+          <div style="color:var(--dim)">→ Neuen SocketClient erstellen<br>→ <code>client.connect()</code> aufrufen<br>→ Timeout: 5s · dann in Pool eintragen</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num-col"><div class="step-num sn-amber">3</div><div class="step-line sl-amber"></div></div>
+    <div class="step-body">
+      <div class="step-actor sa-amber">Socket Adapter — Connection Setup (wenn neu)</div>
+      <div class="step-title">SocketClient.connect() → Cognigy Socket.IO Endpoint</div>
+      <div class="step-desc">Nur beim ersten Request für diesen Agent: Verbindungsaufbau via @cognigy/socket-client. Connection wird nach Erfolg in den Pool eingetragen und bleibt persistent.</div>
+      <div class="code-block">
+<span class="k">const</span> client = <span class="k">new</span> <span class="e">SocketClient</span>(endpointUrl, urlToken, {<br>
+&nbsp;&nbsp;<span class="e">userId</span>: <span class="s">"a2a-gateway"</span>,<br>
+&nbsp;&nbsp;<span class="e">sessionId</span>: <span class="s">"ctx-abc123"</span>,  <span class="c">// = A2A contextId</span><br>
+&nbsp;&nbsp;<span class="e">forceWebsockets</span>: <span class="k">true</span>,   <span class="c">// kein HTTP Polling Fallback</span><br>
+&nbsp;&nbsp;<span class="e">reconnection</span>: <span class="k">false</span>       <span class="c">// eigenes Reconnect-Management</span><br>
+})<br>
+<span class="k">await</span> client.<span class="e">connect</span>()  <span class="c">// Timeout: 5s</span><br>
+pool.<span class="e">register</span>(<span class="s">"booking-agent"</span>, client)  <span class="c">// in Pool eintragen</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num-col"><div class="step-num sn-orange">4</div><div class="step-line sl-orange"></div></div>
+    <div class="step-body">
+      <div class="step-actor sa-orange">Socket Adapter → Cognigy</div>
+      <div class="step-title">Message senden + Event-Listener registrieren</div>
+      <div class="step-desc">Message wird über die bestehende WS-Verbindung gesendet. Event-Listener werden sessionId-spezifisch registriert, damit parallele Sessions sich nicht gegenseitig stören.</div>
+      <div class="code-block">
+client.<span class="e">on</span>(<span class="s">"output"</span>, (output) => {<br>
+&nbsp;&nbsp;<span class="k">if</span> (output.sessionId !== <span class="s">"ctx-abc123"</span>) <span class="k">return</span>  <span class="c">// Session-Filter!</span><br>
+&nbsp;&nbsp;normalizer.<span class="e">handle</span>(output, eventBus)  <span class="c">// → SSE an Client</span><br>
+})<br>
+client.<span class="e">on</span>(<span class="s">"finalPing"</span>, (ping) => {<br>
+&nbsp;&nbsp;<span class="k">if</span> (ping.sessionId !== <span class="s">"ctx-abc123"</span>) <span class="k">return</span><br>
+&nbsp;&nbsp;eventBus.<span class="e">finished</span>()  <span class="c">// → Task completed</span><br>
+})<br>
+client.<span class="e">sendMessage</span>(<span class="s">"Buche Flug nach Berlin am 15.03"</span>)
+      </div>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num-col"><div class="step-num sn-purple">5</div><div class="step-line sl-purple"></div></div>
+    <div class="step-body">
+      <div class="step-actor sa-purple">Cognigy Agentic Flow</div>
+      <div class="step-title">LLM Reasoning + Tool Calls → mehrere emit("output")</div>
+      <div class="step-desc">Der Agentic Flow läuft asynchron. Er kann Sekunden bis Minuten dauern. Mehrere output-Events werden live emittiert — jedes sofort an den A2A Client weitergeleitet.</div>
+      <div class="code-block">
+<span class="c">// Cognigy emittiert mehrfach:</span><br>
+emit(<span class="s">"output"</span>) → { <span class="e">text</span>: <span class="s">"Ich suche verfügbare Flüge..."</span> }<br>
+<span class="c">// LLM ruft Flight-Search-Tool auf...</span><br>
+emit(<span class="s">"output"</span>) → { <span class="e">text</span>: <span class="k">null</span>, <span class="e">data</span>: { <span class="e">_cognigy</span>: { <span class="e">_default</span>: {<br>
+&nbsp;&nbsp;<span class="e">_quickReplies</span>: { <span class="e">quickReplies</span>: [<br>
+&nbsp;&nbsp;&nbsp;&nbsp;{ <span class="e">title</span>: <span class="s">"LH123 · 09:00 · 320€"</span>, <span class="e">payload</span>: <span class="s">"LH123"</span> },<br>
+&nbsp;&nbsp;&nbsp;&nbsp;{ <span class="e">title</span>: <span class="s">"LH456 · 14:30 · 280€"</span>, <span class="e">payload</span>: <span class="s">"LH456"</span> }<br>
+&nbsp;&nbsp;]}}}}}<br>
+emit(<span class="s">"finalPing"</span>) → Flow abgeschlossen
+      </div>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num-col"><div class="step-num sn-cyan">6</div><div class="step-line sl-cyan"></div></div>
+    <div class="step-body">
+      <div class="step-actor sa-cyan">Output Normalizer</div>
+      <div class="step-title">text=null erkannt → TextPart aus _quickReplies generiert</div>
+      <div class="step-desc">Output #1: text vorhanden → direkt. Output #2: text=null, _quickReplies erkannt → TextPart aus Titeln generiert + DataPart mit strukturierten Optionen.</div>
+      <div class="code-block">
+<span class="c">// Output #1: text direkt</span><br>
+[{ <span class="e">kind</span>: <span class="s">"text"</span>, <span class="e">text</span>: <span class="s">"Ich suche verfügbare Flüge..."</span> }]<br><br>
+<span class="c">// Output #2: Generiert aus _quickReplies Titeln</span><br>
+[<br>
+&nbsp;&nbsp;{ <span class="e">kind</span>: <span class="s">"text"</span>, <span class="e">text</span>: <span class="s">"Bitte wähle: LH123 · 09:00 · 320€, LH456 · 14:30 · 280€"</span> },<br>
+&nbsp;&nbsp;{ <span class="e">kind</span>: <span class="s">"data"</span>, <span class="e">data</span>: { <span class="e">type</span>: <span class="s">"quickReplies"</span>, <span class="e">options</span>: [<br>
+&nbsp;&nbsp;&nbsp;&nbsp;{ <span class="e">label</span>: <span class="s">"LH123 · 09:00 · 320€"</span>, <span class="e">value</span>: <span class="s">"LH123"</span> },<br>
+&nbsp;&nbsp;&nbsp;&nbsp;{ <span class="e">label</span>: <span class="s">"LH456 · 14:30 · 280€"</span>, <span class="e">value</span>: <span class="s">"LH456"</span> }<br>
+&nbsp;&nbsp;]}}<br>
+]
+      </div>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num-col"><div class="step-num sn-green">7</div><div class="step-line sl-green"></div></div>
+    <div class="step-body">
+      <div class="step-actor sa-green">Gateway → A2A Client (SSE Stream)</div>
+      <div class="step-title">Live-Streaming: 2 Messages + completed</div>
+      <div class="step-desc">Jeder Cognigy-Output wird sofort als SSE-Event weitergeleitet — kein Warten auf finalPing. Der LLM-Orchestrator verarbeitet sie live.</div>
+      <div class="code-block">
+<span class="e">data</span>: { <span class="e">kind</span>: <span class="s">"message"</span>, <span class="e">parts</span>: [{ <span class="e">kind</span>: <span class="s">"text"</span>, <span class="e">text</span>: <span class="s">"Ich suche..."</span> }] }<br><br>
+<span class="e">data</span>: { <span class="e">kind</span>: <span class="s">"message"</span>, <span class="e">parts</span>: [<br>
+&nbsp;&nbsp;{ <span class="e">kind</span>: <span class="s">"text"</span>, <span class="e">text</span>: <span class="s">"Bitte wähle: LH123 · 09:00 · 320€, LH456 · 14:30 · 280€"</span> },<br>
+&nbsp;&nbsp;{ <span class="e">kind</span>: <span class="s">"data"</span>, <span class="e">data</span>: { <span class="e">type</span>: <span class="s">"quickReplies"</span>, <span class="e">options</span>: [...] }}<br>
+]}<br><br>
+<span class="e">data</span>: { <span class="e">kind</span>: <span class="s">"status"</span>, <span class="e">status</span>: { <span class="e">state</span>: <span class="s">"completed"</span> }, <span class="e">final</span>: <span class="k">true</span> }
+      </div>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num-col"><div class="step-num sn-amber">8</div><div class="step-line sl-amber"></div></div>
+    <div class="step-body">
+      <div class="step-actor sa-amber">Connection Pool — Post-Request</div>
+      <div class="step-title">Connection bleibt IDLE im Pool — kein Disconnect</div>
+      <div class="step-desc">Nach dem finalPing: Session-Listener werden entfernt. Die WS-Verbindung zum booking-agent-Endpoint bleibt aber offen und geht in den IDLE-State. Der nächste Request für booking-agent nutzt sie sofort wieder — ohne Verbindungsaufbau.</div>
+      <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+        <span class="pill p-pool">WS Connection: IDLE</span>
+        <span class="pill p-out">Session ctx-abc123: closed</span>
+        <span class="pill p-warn">Idle-Timeout: 5min → dann disconnect</span>
+        <span class="pill p-pool">Keepalive Ping: alle 30s</span>
+      </div>
+    </div>
+  </div>
+
+</div>
+</div>
+
+<!-- ═══════════════════════════════════════ PANEL: SOCKET MGMT ═══ -->
+<div class="panel" id="socket-mgmt">
+
+  <div class="sm-grid">
+
+    <!-- STATE MACHINE -->
+    <div class="sm-card">
+      <div class="sm-card-title" style="color:var(--amber)">⚡ Connection State Machine</div>
+      <div class="sm-card-body">Eine Connection pro Agent-Endpoint durchläuft diese States:</div>
+      <div class="state-machine">
+        <div class="sm-state st-connecting">
+          <div class="sm-state-dot"></div>
+          <div class="sm-state-name">CONNECTING</div>
+          <div class="sm-state-desc">client.connect() läuft · Token-Auth · Timeout 5s · bei Fehler → DEAD</div>
+        </div>
+        <div class="sm-arrow">↓ connect() erfolgreich</div>
+        <div class="sm-state st-idle">
+          <div class="sm-state-dot"></div>
+          <div class="sm-state-name">IDLE</div>
+          <div class="sm-state-desc">Verbunden · keine aktive Session · Keepalive-Ping alle 30s · nach 5min Inaktivität → Disconnect</div>
+        </div>
+        <div class="sm-arrow">↓ sendMessage() aufgerufen</div>
+        <div class="sm-state st-active">
+          <div class="sm-state-dot"></div>
+          <div class="sm-state-name">ACTIVE</div>
+          <div class="sm-state-desc">≥1 Session läuft · Outputs fließen · finalPing erwartet · mehrere Sessions parallel möglich</div>
+        </div>
+        <div class="sm-arrow">↓ alle Sessions beendet (finalPing) → IDLE &nbsp;|&nbsp; on("disconnect") → RECONNECTING</div>
+        <div class="sm-state st-reconn">
+          <div class="sm-state-dot"></div>
+          <div class="sm-state-name">RECONNECTING</div>
+          <div class="sm-state-desc">Exponential Backoff · 1s → 2s → 4s → 8s → 16s → 30s max · Jitter ±20% · max 5 Versuche</div>
+        </div>
+        <div class="sm-arrow">↓ max Versuche erreicht oder Auth-Fehler</div>
+        <div class="sm-state st-dead">
+          <div class="sm-state-dot"></div>
+          <div class="sm-state-name">DEAD</div>
+          <div class="sm-state-desc">Aus Pool entfernt · alle laufenden Sessions erhalten Error · nächster Request erstellt neue Connection</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- POOL + MULTIPLEXING -->
+    <div class="sm-card">
+      <div class="sm-card-title" style="color:var(--cyan)">↔ Session Multiplexing via Pool</div>
+      <div class="sm-card-body" style="margin-bottom:10px">
+        Viele parallele A2A-Requests nutzen <strong style="color:#fff">eine einzige WS-Verbindung</strong> pro Agent-Endpoint. Isolation via <code>sessionId</code>.
+      </div>
+      <div class="pool-diagram">
+        <div class="pd-row">
+          <div class="pd-label" style="color:var(--amber);font-weight:700">booking-agent</div>
+          <div class="pd-conn pd-active">● WS ACTIVE · endpoint-trial.cognigy.ai</div>
+        </div>
+        <div class="pd-row">
+          <div class="pd-label" style="padding-left:12px">ctx-001</div>
+          <div class="pd-sess pd-sess-a">↔ Läuft · LLM reasoning</div>
+        </div>
+        <div class="pd-row">
+          <div class="pd-label" style="padding-left:12px">ctx-002</div>
+          <div class="pd-sess pd-sess-a">↔ Läuft · Tool Call</div>
+        </div>
+        <div class="pd-row">
+          <div class="pd-label" style="padding-left:12px">ctx-003</div>
+          <div class="pd-sess pd-sess-i">○ Wartet auf Reply</div>
+        </div>
+        <div class="pd-row" style="margin-top:10px">
+          <div class="pd-label" style="color:var(--muted);font-weight:700">billing-agent</div>
+          <div class="pd-conn pd-idle">○ IDLE · endpoint.cognigy.ai · kein Traffic</div>
+        </div>
+        <div class="pd-row" style="margin-top:10px">
+          <div class="pd-label" style="color:var(--muted);font-weight:700">hr-agent</div>
+          <div class="pd-conn" style="background:#080808;border:1px solid #1a1a1a;color:#333">— NICHT VERBUNDEN · erster Request erstellt Connection</div>
+        </div>
+      </div>
+      <div style="margin-top:12px;font-size:9.5px;color:var(--muted);line-height:1.6">
+        <strong style="color:var(--cyan)">Output-Routing:</strong> on("output") prüft <code>output.sessionId</code> → dispatcht nur an den korrekten SSE-Stream. Andere Sessions bleiben unberührt.
+      </div>
+    </div>
+
+  </div>
+
+  <!-- RECONNECT TIMELINE -->
+  <div class="sm-card" style="margin-bottom:16px">
+    <div class="sm-card-title" style="color:#ff7043">🔴 Reconnect-Szenario: Was passiert bei einem Disconnect?</div>
+
+    <div class="backoff-diagram">
+      <div class="bd-bar-group">
+        <div class="bd-bar" style="height:14px;background:linear-gradient(to top,#ef4444,#f87171)"></div>
+        <div class="bd-time">sofort</div>
+        <div class="bd-att">Attempt 1</div>
+      </div>
+      <div class="bd-bar-group">
+        <div class="bd-bar" style="height:20px;background:linear-gradient(to top,#f97316,#fb923c)"></div>
+        <div class="bd-time">+1s</div>
+        <div class="bd-att">Attempt 2</div>
+      </div>
+      <div class="bd-bar-group">
+        <div class="bd-bar" style="height:30px;background:linear-gradient(to top,#eab308,#fbbf24)"></div>
+        <div class="bd-time">+2s</div>
+        <div class="bd-att">Attempt 3</div>
+      </div>
+      <div class="bd-bar-group">
+        <div class="bd-bar" style="height:46px;background:linear-gradient(to top,#84cc16,#a3e635)"></div>
+        <div class="bd-time">+4s</div>
+        <div class="bd-att">Attempt 4</div>
+      </div>
+      <div class="bd-bar-group">
+        <div class="bd-bar" style="height:60px;background:linear-gradient(to top,#22d3ee,#67e8f9)"></div>
+        <div class="bd-time">+8s</div>
+        <div class="bd-att">Attempt 5</div>
+      </div>
+      <div style="padding-left:8px;display:flex;flex-direction:column;justify-content:flex-end;gap:4px;padding-bottom:2px">
+        <div style="font-size:9px;color:var(--dim)">+ Jitter ±20% auf jeden Wert</div>
+        <div style="font-size:9px;color:var(--dim)">Max Cap: 30s</div>
+        <div style="font-size:9px;color:var(--red)">Auth-Fehler → kein Retry</div>
+      </div>
+    </div>
+
+    <div class="timeline" style="margin-top:16px">
+      <div class="tl-item">
+        <div class="tl-time">T+0ms</div>
+        <div class="tl-dot" style="background:var(--red)"></div>
+        <div class="tl-body">
+          <div class="tl-event">on("disconnect") gefeuert</div>
+          <div class="tl-detail">Connection-State → RECONNECTING · laufende Sessions merken sich ausstehende Nachrichten · SSE-Stream bleibt offen (Client wartet)</div>
+        </div>
+      </div>
+      <div class="tl-item">
+        <div class="tl-time">T+1000ms</div>
+        <div class="tl-dot" style="background:var(--orange)"></div>
+        <div class="tl-body">
+          <div class="tl-event">Reconnect Attempt #1 — connect()</div>
+          <div class="tl-detail">Neuer SocketClient für diesen Endpoint · wenn erfolgreich → IDLE, pending Messages re-sent · wenn Fehler → wait 2s</div>
+        </div>
+      </div>
+      <div class="tl-item">
+        <div class="tl-time">T+3000ms</div>
+        <div class="tl-dot" style="background:var(--amber)"></div>
+        <div class="tl-body">
+          <div class="tl-event">Reconnect Attempt #2 — connect()</div>
+          <div class="tl-detail">Exponential Backoff · 2s Wartezeit · + ~400ms Jitter · Client-SSE-Stream noch offen</div>
+        </div>
+      </div>
+      <div class="tl-item">
+        <div class="tl-time">T+7000ms</div>
+        <div class="tl-dot" style="background:var(--green)"></div>
+        <div class="tl-body">
+          <div class="tl-event">✓ Reconnected — Connection ACTIVE</div>
+          <div class="tl-detail">Pool aktualisiert · Session-Listener neu registriert · Output-Flow geht weiter · Client hat keinen Unterbruch gemerkt</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- KEY RULES -->
+  <div class="sm-card">
+    <div class="sm-card-title" style="color:var(--green)">✓ Kritische Regeln — Connection Management</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:10px">
+      <div>
+        <div style="color:var(--green);font-weight:700;margin-bottom:6px">IMMER</div>
+        <div style="color:var(--dim);line-height:1.7">
+          ✓ <code>forceWebsockets: true</code> — kein HTTP-Polling Fallback<br>
+          ✓ Session-Filter bei jedem on("output")<br>
+          ✓ Connection im Pool nach connect() registrieren<br>
+          ✓ Keepalive-Ping um IDLE-Timeout zu vermeiden<br>
+          ✓ Auth-Fehler sofort als DEAD markieren (kein Retry)
+        </div>
+      </div>
+      <div>
+        <div style="color:var(--red);font-weight:700;margin-bottom:6px">NIE</div>
+        <div style="color:var(--dim);line-height:1.7">
+          ✗ Neue Connection pro Request erstellen<br>
+          ✗ SocketClient intern reconnecten lassen (<code>reconnection: false</code>)<br>
+          ✗ ohne Session-Filter auf "output" hören<br>
+          ✗ Connection nach finalPing disconnecten<br>
+          ✗ Auth-Token im Log ausgeben
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+function showPanel(id, btn) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t => { t.classList.remove('active'); t.classList.remove('active-amber'); });
+  document.getElementById(id).classList.add('active');
+  if (id === 'socket-mgmt') btn.classList.add('active-amber');
+  else btn.classList.add('active');
+}
+</script>
+</body>
+</html>

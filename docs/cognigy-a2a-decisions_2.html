@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cognigy A2A — Architecture Decision Log</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Mono:wght@400;500&family=Outfit:wght@400;500;600;700&display=swap');
+
+/* ── DARK (default) ── */
+:root {
+  --bg: #05070d;
+  --surface: #0b0f1a;
+  --card: #0e1420;
+  --border: #1a2540;
+  --border-hover: #2a3d66;
+  --c-challenge: #f87171;
+  --c-decision: #34d399;
+  --c-why: #60a5fa;
+  --txt: #dde6f5;
+  --muted: #4a6080;
+  --dim: #8fa0ba;
+  --accent1: #3b82f6;
+  --accent2: #10b981;
+  --accent3: #f59e0b;
+  --accent4: #8b5cf6;
+  --accent5: #06b6d4;
+  --accent6: #ec4899;
+}
+
+/* ── LIGHT ── */
+html.light {
+  --bg: #f2f5fa;
+  --surface: #e8edf5;
+  --card: #ffffff;
+  --border: #d0daea;
+  --border-hover: #93b4d4;
+  --c-challenge: #dc2626;
+  --c-decision: #047857;
+  --c-why: #1d4ed8;
+  --txt: #1e293b;
+  --muted: #64748b;
+  --dim: #475569;
+  --accent1: #2563eb;
+  --accent2: #059669;
+  --accent3: #d97706;
+  --accent4: #7c3aed;
+  --accent5: #0891b2;
+  --accent6: #db2777;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  background: var(--bg);
+  color: var(--txt);
+  font-family: 'Outfit', sans-serif;
+  min-height: 100vh;
+  transition: background .3s, color .3s;
+}
+
+/* ── TOGGLE BUTTON ── */
+#theme-toggle {
+  position: fixed;
+  top: 18px; right: 22px;
+  z-index: 1000;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 100px;
+  padding: 6px 14px 6px 10px;
+  display: flex; align-items: center; gap: 7px;
+  cursor: pointer;
+  font-family: 'DM Mono', monospace;
+  font-size: 10px; font-weight: 700;
+  color: var(--txt);
+  letter-spacing: .5px;
+  transition: all .25s;
+  box-shadow: 0 2px 12px rgba(0,0,0,.2);
+}
+#theme-toggle:hover { transform: translateY(-1px); box-shadow: 0 4px 20px rgba(0,0,0,.25); }
+#theme-toggle .ico { font-size: 14px; line-height: 1; }
+html.light #theme-toggle { box-shadow: 0 2px 12px rgba(0,0,0,.1); }
+
+/* ── HEADER ── */
+.header {
+  position: relative; z-index: 1;
+  padding: 52px 32px 40px;
+  max-width: 1080px; margin: 0 auto;
+}
+.header-eyebrow {
+  font-family: 'DM Mono', monospace;
+  font-size: 10px; letter-spacing: 3px; text-transform: uppercase;
+  color: var(--muted); margin-bottom: 14px;
+  display: flex; align-items: center; gap: 10px;
+}
+.header-eyebrow::before { content: ''; width: 28px; height: 1px; background: var(--muted); }
+.header h1 {
+  font-family: 'Instrument Serif', serif;
+  font-size: 42px; font-weight: 400; letter-spacing: -1px; line-height: 1.1;
+  color: var(--txt); margin-bottom: 10px; transition: color .3s;
+}
+html.dark .header h1, body:not(.light) .header h1 { color: #fff; }
+html.light .header h1 { color: #0f172a; }
+.header h1 em { font-style: italic; color: var(--accent5); }
+.header-sub { font-size: 14px; color: var(--dim); max-width: 520px; line-height: 1.6; margin-bottom: 28px; }
+
+/* ── FILTER TABS ── */
+.filter-bar { display: flex; gap: 6px; flex-wrap: wrap; }
+.filter-btn {
+  font-family: 'DM Mono', monospace;
+  font-size: 10px; font-weight: 500; letter-spacing: 1.5px; text-transform: uppercase;
+  padding: 6px 14px; border-radius: 100px;
+  border: 1px solid var(--border); background: transparent; color: var(--muted);
+  cursor: pointer; transition: all .2s;
+}
+.filter-btn:hover { background: var(--card); border-color: var(--border-hover); color: var(--txt); }
+.filter-btn.active { background: var(--card); border-color: var(--accent1); color: var(--accent1); }
+
+/* ── STATS ── */
+.stats {
+  position: relative; z-index: 1;
+  max-width: 1080px; margin: 0 auto 32px;
+  padding: 0 32px;
+  display: flex; gap: 28px; flex-wrap: wrap;
+}
+.stat { display: flex; align-items: baseline; gap: 6px; }
+.stat-num {
+  font-family: 'Instrument Serif', serif; font-size: 28px;
+  font-style: italic; transition: color .3s;
+}
+html.light .stat-num { color: #0f172a; }
+body:not(.light) .stat-num { color: #fff; }
+.stat-lbl { font-family: 'DM Mono', monospace; font-size: 9.5px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--muted); }
+
+/* ── GRID ── */
+.grid {
+  position: relative; z-index: 1;
+  max-width: 1080px; margin: 0 auto;
+  padding: 0 32px 80px;
+  display: flex; flex-direction: column; gap: 12px;
+}
+
+/* ── CARD ── */
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px; overflow: hidden;
+  transition: border-color .25s, box-shadow .25s, background .3s;
+  cursor: pointer; position: relative;
+  opacity: 0; transform: translateY(10px);
+  animation: cardReveal .4s forwards;
+}
+.card:nth-child(1){animation-delay:.04s}.card:nth-child(2){animation-delay:.09s}
+.card:nth-child(3){animation-delay:.14s}.card:nth-child(4){animation-delay:.19s}
+.card:nth-child(5){animation-delay:.24s}.card:nth-child(6){animation-delay:.29s}
+@keyframes cardReveal { to { opacity: 1; transform: none; } }
+
+.card:hover { border-color: var(--border-hover); }
+html.light .card:hover { box-shadow: 0 8px 32px rgba(0,0,0,.10); }
+body:not(.light) .card:hover { box-shadow: 0 8px 40px rgba(0,0,0,.35); }
+
+.card.open { border-color: var(--card-accent); }
+html.light .card.open { box-shadow: 0 0 0 1px var(--card-accent), 0 12px 40px rgba(0,0,0,.10); }
+body:not(.light) .card.open { box-shadow: 0 0 0 1px var(--card-accent), 0 12px 48px rgba(0,0,0,.45); }
+
+/* accent bar top */
+.card::after {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+  background: var(--card-accent); opacity: 0; transition: opacity .25s;
+}
+.card.open::after, .card:hover::after { opacity: 1; }
+
+/* card header */
+.card-header {
+  display: grid; grid-template-columns: 52px 1fr auto;
+  align-items: center; gap: 16px; padding: 20px 24px;
+}
+.card-num {
+  font-family: 'Instrument Serif', serif; font-size: 32px;
+  color: var(--card-accent); opacity: .4; line-height: 1; font-style: italic;
+  transition: opacity .2s; text-align: right; padding-right: 12px;
+  border-right: 1px solid var(--border);
+}
+.card:hover .card-num, .card.open .card-num { opacity: .8; }
+.card-category {
+  font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: 2px;
+  text-transform: uppercase; color: var(--card-accent); margin-bottom: 5px; opacity: .7;
+}
+.card-title { font-size: 16px; font-weight: 600; letter-spacing: -.2px; line-height: 1.3; transition: color .3s; }
+html.light .card-title { color: #0f172a; }
+body:not(.light) .card-title { color: #fff; }
+
+.card-verdict { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex-shrink: 0; }
+.verdict-tag {
+  font-family: 'DM Mono', monospace; font-size: 9px; font-weight: 500;
+  letter-spacing: 1px; text-transform: uppercase;
+  padding: 4px 10px; border-radius: 100px; white-space: nowrap;
+}
+.vt-decided  { border: 1px solid; }
+.vt-tradeoff { border: 1px solid; }
+html.light .vt-decided  { background: rgba(4,120,87,.08); color:#047857; border-color:rgba(4,120,87,.25); }
+html.light .vt-tradeoff { background: rgba(220,38,38,.08); color:#dc2626; border-color:rgba(220,38,38,.2); }
+body:not(.light) .vt-decided  { background: rgba(52,211,153,.12); color: var(--c-decision); border-color: rgba(52,211,153,.2); }
+body:not(.light) .vt-tradeoff { background: rgba(248,113,113,.1); color: var(--c-challenge); border-color: rgba(248,113,113,.2); }
+
+.chevron { font-size: 12px; color: var(--muted); transition: transform .3s; margin-top: 2px; }
+.card.open .chevron { transform: rotate(180deg); color: var(--card-accent); }
+
+/* card body */
+.card-body { display: none; border-top: 1px solid var(--border); }
+.card.open .card-body { display: block; }
+
+.sections { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0; }
+@media (max-width: 780px) { .sections { grid-template-columns: 1fr; } }
+
+.section { padding: 22px 24px; border-right: 1px solid var(--border); }
+.section:last-child { border-right: none; }
+
+.section-label {
+  font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: 2.5px;
+  text-transform: uppercase; margin-bottom: 12px;
+  display: flex; align-items: center; gap: 7px;
+}
+.section-label .dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+
+.sec-challenge .section-label { color: var(--c-challenge); }
+.sec-challenge .dot { background: var(--c-challenge); }
+.sec-decision .section-label { color: var(--c-decision); }
+.sec-decision .dot { background: var(--c-decision); }
+.sec-why .section-label { color: var(--c-why); }
+.sec-why .dot { background: var(--c-why); }
+
+.section-text { font-size: 13px; color: var(--dim); line-height: 1.65; }
+.section-text strong { color: var(--txt); font-weight: 500; }
+.section-text code {
+  font-family: 'DM Mono', monospace; font-size: 11.5px;
+  padding: 1px 5px; border-radius: 4px; color: var(--card-accent);
+  transition: background .3s;
+}
+html.light .section-text code { background: rgba(0,0,0,.06); }
+body:not(.light) .section-text code { background: rgba(255,255,255,.06); }
+
+.rejected {
+  margin-top: 12px; padding: 10px 12px; border-radius: 8px;
+  font-size: 11.5px; font-family: 'DM Mono', monospace;
+  transition: background .3s, border-color .3s;
+}
+html.light .rejected { background:rgba(220,38,38,.06); border:1px solid rgba(220,38,38,.2); color:#dc2626; }
+body:not(.light) .rejected { background: rgba(248,113,113,.06); border: 1px solid rgba(248,113,113,.15); color: var(--c-challenge); }
+.rejected::before { content: '✗ Verworfen: '; opacity: .6; }
+
+.chosen {
+  margin-top: 12px; padding: 10px 12px; border-radius: 8px;
+  font-size: 11.5px; font-family: 'DM Mono', monospace;
+  transition: background .3s, border-color .3s;
+}
+html.light .chosen { background:rgba(4,120,87,.06); border:1px solid rgba(4,120,87,.2); color:#047857; }
+body:not(.light) .chosen { background: rgba(52,211,153,.06); border: 1px solid rgba(52,211,153,.15); color: var(--c-decision); }
+.chosen::before { content: '✓ Gewählt: '; opacity: .6; }
+
+/* ── THEME COLOR PER CARD ── */
+.theme-blue   { --card-accent: #3b82f6; }
+.theme-green  { --card-accent: #10b981; }
+.theme-amber  { --card-accent: #f59e0b; }
+.theme-purple { --card-accent: #8b5cf6; }
+.theme-cyan   { --card-accent: #06b6d4; }
+.theme-pink   { --card-accent: #ec4899; }
+
+html.light .theme-blue   { --card-accent: #2563eb; }
+html.light .theme-green  { --card-accent: #059669; }
+html.light .theme-amber  { --card-accent: #d97706; }
+html.light .theme-purple { --card-accent: #7c3aed; }
+html.light .theme-cyan   { --card-accent: #0891b2; }
+html.light .theme-pink   { --card-accent: #db2777; }
+
+.card.hidden { display: none; }
+</style>
+</head>
+<body>
+
+<!-- TOGGLE -->
+<button id="theme-toggle" onclick="toggleTheme()" title="Light/Dark Mode">
+  <span class="ico" id="toggle-ico">☀️</span>
+  <span id="toggle-lbl">Light Mode</span>
+</button>
+
+<!-- HEADER -->
+<header class="header">
+  <div class="header-eyebrow">Architecture Decision Log</div>
+  <h1>Cognigy A2A Gateway<br><em>Challenges & Decisions</em></h1>
+  <p class="header-sub">Dokumentation der wichtigsten Architektur-Entscheidungen — was die Herausforderung war, was wir gewählt haben, und warum.</p>
+  <div class="filter-bar">
+    <button class="filter-btn active" onclick="filterCards('all', this)">Alle</button>
+    <button class="filter-btn" onclick="filterCards('gateway', this)">Gateway Design</button>
+    <button class="filter-btn" onclick="filterCards('transport', this)">Transport</button>
+    <button class="filter-btn" onclick="filterCards('data', this)">Data Model</button>
+    <button class="filter-btn" onclick="filterCards('session', this)">Session</button>
+    <button class="filter-btn" onclick="filterCards('sdk', this)">SDK / Libraries</button>
+  </div>
+</header>
+
+<div class="stats">
+  <div class="stat"><span class="stat-num">6</span><span class="stat-lbl">Decisions</span></div>
+  <div class="stat"><span class="stat-num">4</span><span class="stat-lbl">Verworfene Alternativen</span></div>
+  <div class="stat"><span class="stat-num">1</span><span class="stat-lbl">Offener Punkt</span></div>
+</div>
+
+<div class="grid">
+
+  <!-- 01 -->
+  <div class="card theme-blue" data-cat="gateway" onclick="toggleCard(this)">
+    <div class="card-header">
+      <div class="card-num">01</div>
+      <div class="card-meta">
+        <div class="card-category">Gateway Design</div>
+        <div class="card-title">Ein zentrales Gateway statt Server pro Agent</div>
+      </div>
+      <div class="card-verdict">
+        <span class="verdict-tag vt-decided">Entschieden</span>
+        <span class="chevron">▼</span>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="sections">
+        <div class="section sec-challenge">
+          <div class="section-label"><span class="dot"></span>Challenge</div>
+          <div class="section-text">Das A2A-Protokoll verlangt, dass jeder Agent eine eigene <strong>AgentCard</strong> unter <code>/.well-known/agent-card.json</code> bereitstellt. Naive Umsetzung: <strong>ein eigener HTTP-Server pro Cognigy-Agent</strong>. Bei 10 Agents = 10 Server, 10 Deployments. Nicht skalierbar.</div>
+          <div class="rejected">1 Server pro Agent (naive Umsetzung)</div>
+        </div>
+        <div class="section sec-decision">
+          <div class="section-label"><span class="dot"></span>Decision</div>
+          <div class="section-text"><strong>Ein zentrales Gateway</strong> mit virtuellen Agent-Routen: <code>/agents/{id}/.well-known/agent-card.json</code>. Neuer Agent = nur ein Eintrag in <code>agents.config.json</code>, kein Deployment.</div>
+          <div class="chosen">Centralized A2A Gateway + Agent Registry</div>
+        </div>
+        <div class="section sec-why">
+          <div class="section-label"><span class="dot"></span>Warum</div>
+          <div class="section-text">Operational simplicity ist entscheidend. <strong>Ein Deployment-Artifact</strong>, ein Port, ein Log-Stream. Die Agent Registry entkoppelt Konfiguration von Deployment. Neuer Agent in unter einer Minute aktiv.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 02 -->
+  <div class="card theme-green" data-cat="sdk" onclick="toggleCard(this)">
+    <div class="card-header">
+      <div class="card-num">02</div>
+      <div class="card-meta">
+        <div class="card-category">SDK / Libraries</div>
+        <div class="card-title">@a2a-js/sdk statt Low-Level Google Protobuf SDK</div>
+      </div>
+      <div class="card-verdict">
+        <span class="verdict-tag vt-decided">Entschieden</span>
+        <span class="chevron">▼</span>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="sections">
+        <div class="section sec-challenge">
+          <div class="section-label"><span class="dot"></span>Challenge</div>
+          <div class="section-text">Google bietet ein offizielles A2A SDK an, aber es ist <strong>low-level und Protobuf-basiert</strong>. JSON-RPC, SSE-Lifecycle, AgentCard-Discovery und TaskStore selbst bauen = Wochen Arbeit und viele mögliche Protokoll-Bugs.</div>
+          <div class="rejected">@google-cloud/a2a (Protobuf, low-level)</div>
+        </div>
+        <div class="section sec-decision">
+          <div class="section-label"><span class="dot"></span>Decision</div>
+          <div class="section-text"><strong>@a2a-js/sdk</strong> — offizielles TypeScript SDK (Linux Foundation, v0.3.0). Bringt <code>DefaultRequestHandler</code>, <code>InMemoryTaskStore</code>, <code>AgentExecutor</code> Interface und SSE-Lifecycle out-of-the-box.</div>
+          <div class="chosen">@a2a-js/sdk (offiziell, v0.3.0)</div>
+        </div>
+        <div class="section sec-why">
+          <div class="section-label"><span class="dot"></span>Warum</div>
+          <div class="section-text"><strong>Protokoll-Korrektheit ohne eigene Implementierung.</strong> Wir implementieren nur <code>AgentExecutor.execute()</code> — alles andere löst das SDK. Express ist Peer-Dependency, volle TypeScript-Typen.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 03 -->
+  <div class="card theme-amber" data-cat="transport" onclick="toggleCard(this)">
+    <div class="card-header">
+      <div class="card-num">03</div>
+      <div class="card-meta">
+        <div class="card-category">Transport</div>
+        <div class="card-title">Zwei Adapter: REST für Standalone, Socket für Agentic Flows</div>
+      </div>
+      <div class="card-verdict">
+        <span class="verdict-tag vt-decided">Entschieden</span>
+        <span class="chevron">▼</span>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="sections">
+        <div class="section sec-challenge">
+          <div class="section-label"><span class="dot"></span>Challenge</div>
+          <div class="section-text">Cognigy hat zwei fundamental verschiedene Endpoint-Typen: <strong>REST</strong> (synchron, max 8s Timeout) und <strong>Socket.IO</strong> (bidirektional, kein Timeout, live streaming). Ein einheitlicher Adapter würde beide Welten kompromittieren.</div>
+          <div class="rejected">Nur REST (8s Timeout, kein Streaming)</div>
+        </div>
+        <div class="section sec-decision">
+          <div class="section-label"><span class="dot"></span>Decision</div>
+          <div class="section-text"><strong>Strategy Pattern</strong>: <code>endpointType</code> in der Registry entscheidet den Adapter. <code>"REST"</code> → <code>RestAdapter</code> mit axios. <code>"SOCKET"</code> → <code>SocketAdapter</code> mit <code>@cognigy/socket-client</code>. Beide produzieren identisches A2A Part-Format.</div>
+          <div class="chosen">Strategy Pattern: REST + Socket Adapter</div>
+        </div>
+        <div class="section sec-why">
+          <div class="section-label"><span class="dot"></span>Warum</div>
+          <div class="section-text"><strong>Fit for purpose.</strong> Einfache FAQ-Flows brauchen keinen WebSocket-Overhead. Agentic Flows mit LLM-Reasoning können Minuten dauern — Socket.IO mit live-streaming ist die einzig sinnvolle Wahl. Beide co-existieren ohne Kompromiss.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 04 -->
+  <div class="card theme-cyan" data-cat="sdk" onclick="toggleCard(this)">
+    <div class="card-header">
+      <div class="card-num">04</div>
+      <div class="card-meta">
+        <div class="card-category">SDK / Libraries</div>
+        <div class="card-title">@cognigy/socket-client + axios — nicht rest-api-client</div>
+      </div>
+      <div class="card-verdict">
+        <span class="verdict-tag vt-decided">Entschieden</span>
+        <span class="chevron">▼</span>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="sections">
+        <div class="section sec-challenge">
+          <div class="section-label"><span class="dot"></span>Challenge</div>
+          <div class="section-text">Cognigy bietet drei NPM Packages. <code>@cognigy/rest-api-client</code> klingt richtig für REST — ist aber die <strong>Management/Admin API</strong> für das Erstellen von Flows und Projekten. Nicht für Konversation. Fataler Fehler wenn man das übersieht.</div>
+          <div class="rejected">@cognigy/rest-api-client (falsche API!)</div>
+        </div>
+        <div class="section sec-decision">
+          <div class="section-label"><span class="dot"></span>Decision</div>
+          <div class="section-text"><strong>@cognigy/socket-client</strong> für Socket.IO Endpoints. <strong>axios</strong> direkt für REST Endpoints — POST mit <code>{userId, sessionId, text, data}</code>, Response enthält <code>outputStack[]</code>. Kein unnötiger Wrapper.</div>
+          <div class="chosen">@cognigy/socket-client + axios</div>
+        </div>
+        <div class="section sec-why">
+          <div class="section-label"><span class="dot"></span>Warum</div>
+          <div class="section-text"><code>@cognigy/socket-client</code> abstrahiert Socket.IO Events, Reconnection-Logic und Session-Handling korrekt. Für REST reicht axios — volle Kontrolle. <code>@cognigy/cognigy-client</code> ist deprecated (inactive maintenance).</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 05 -->
+  <div class="card theme-purple" data-cat="session" onclick="toggleCard(this)">
+    <div class="card-header">
+      <div class="card-num">05</div>
+      <div class="card-meta">
+        <div class="card-category">Session Management</div>
+        <div class="card-title">1:1 Mapping: A2A contextId = Cognigy sessionId</div>
+      </div>
+      <div class="card-verdict">
+        <span class="verdict-tag vt-decided">Entschieden</span>
+        <span class="chevron">▼</span>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="sections">
+        <div class="section sec-challenge">
+          <div class="section-label"><span class="dot"></span>Challenge</div>
+          <div class="section-text">Zwei Session-Konzepte müssen verbunden werden: <strong>A2A contextId</strong> und <strong>Cognigy sessionId + userId</strong>. Ein vollständiger Mapping-Store würde Redis oder DynamoDB erfordern — schon im Prototyp. Zu viel Overhead.</div>
+          <div class="rejected">Separater Mapping-Store mit UUID-Generierung</div>
+        </div>
+        <div class="section sec-decision">
+          <div class="section-label"><span class="dot"></span>Decision</div>
+          <div class="section-text"><strong>Direktes Durchreichen</strong>: <code>cognigy.sessionId = a2a.contextId</code>. Die userId wird auf <code>"a2a-gateway"</code> gesetzt (fix). Kein Mapping-Store nötig. Prototyp: einfache <code>Map&lt;string, string&gt;</code>.</div>
+          <div class="chosen">1:1 Mapping · userId="a2a-gateway" (fix)</div>
+        </div>
+        <div class="section sec-why">
+          <div class="section-label"><span class="dot"></span>Warum</div>
+          <div class="section-text"><strong>Zero-overhead, deterministisch nachvollziehbar.</strong> Multi-Turn funktioniert automatisch — Cognigy speichert den Konversationskontext unter dieser sessionId. Debugging trivial: A2A-contextId = Cognigy-Session direkt sichtbar.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 06 -->
+  <div class="card theme-pink" data-cat="data" onclick="toggleCard(this)">
+    <div class="card-header">
+      <div class="card-num">06</div>
+      <div class="card-meta">
+        <div class="card-category">Data Model</div>
+        <div class="card-title">TextPart immer generieren — DataPart als optionale Ergänzung</div>
+      </div>
+      <div class="card-verdict">
+        <span class="verdict-tag vt-decided">Entschieden</span>
+        <span class="chevron">▼</span>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="sections">
+        <div class="section sec-challenge">
+          <div class="section-label"><span class="dot"></span>Challenge</div>
+          <div class="section-text">Cognigy sendet viele Output-Typen und oft <code>text=null</code> wenn ein Rich-Type vorhanden ist. A2A-Consumers — besonders LLM-Agents — müssen immer lesbaren Text bekommen. Nur DataPart würde LLM-Agents brechen.</div>
+          <div class="rejected">Nur DataPart (bricht LLM-Agents)</div>
+          <div class="rejected">Nur TextPart (verliert strukturierte Daten)</div>
+        </div>
+        <div class="section sec-decision">
+          <div class="section-label"><span class="dot"></span>Decision</div>
+          <div class="section-text"><strong>OutputNormalizer</strong>: Für jeden Cognigy-Typ wird ein <strong>TextPart aus dem Typ-Inhalt generiert</strong> (z.B. <code>_quickReplies</code>: "Bitte wähle: LH123 · 09:00 · 320€, LH456 · 14:30 · 280€"). Dazu optional ein <strong>DataPart</strong>.</div>
+          <div class="chosen">TextPart (IMMER) + DataPart (optional)</div>
+        </div>
+        <div class="section sec-why">
+          <div class="section-label"><span class="dot"></span>Warum</div>
+          <div class="section-text"><strong>Text ist die universelle Sprache.</strong> Jeder Consumer — LLM-Agent, Rule-Based, Copilot-UI — kann TextPart lesen ohne Cognigy zu kennen. DataPart ist Optimierung für Consumers die den Typ kennen. Ignorieren ist immer safe. Kein Consumer bricht.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ── THEME TOGGLE ──
+(function(){
+  const saved = localStorage.getItem('cognigy-theme') || 'dark';
+  if (saved === 'light') { document.documentElement.classList.add('light'); updateBtn('light'); }
+  function updateBtn(t) {
+    const ico = document.getElementById('toggle-ico');
+    const lbl = document.getElementById('toggle-lbl');
+    if (!ico || !lbl) return;
+    ico.textContent = t === 'light' ? '🌙' : '☀️';
+    lbl.textContent = t === 'light' ? 'Dark Mode' : 'Light Mode';
+  }
+  window.toggleTheme = function() {
+    const isLight = document.documentElement.classList.toggle('light');
+    const t = isLight ? 'light' : 'dark';
+    localStorage.setItem('cognigy-theme', t);
+    updateBtn(t);
+  };
+})();
+
+// ── CARDS ──
+function toggleCard(card) { card.classList.toggle('open'); }
+
+function filterCards(cat, btn) {
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.querySelectorAll('.card').forEach(card => {
+    card.classList.toggle('hidden', cat !== 'all' && card.getAttribute('data-cat') !== cat);
+  });
+}
+
+// Open first card by default
+document.querySelector('.card').classList.add('open');
+</script>
+</body>
+</html>

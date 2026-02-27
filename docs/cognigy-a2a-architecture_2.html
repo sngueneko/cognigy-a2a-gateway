@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<title>Cognigy A2A Gateway — Architecture</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Syne:wght@500;700;800&display=swap');
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#06090f;--s1:#0c1220;--s2:#111927;
+  --border:#1c2d47;
+  --blue:#4f9cf9;--cyan:#22d3ee;--green:#34d399;
+  --orange:#fb923c;--purple:#a78bfa;--red:#f87171;--amber:#fbbf24;
+  --txt:#c8d6ef;--muted:#4a6080;--dim:#7a96b8;
+}
+body{background:var(--bg);color:var(--txt);font-family:'IBM Plex Mono',monospace;padding:28px 20px 60px;min-height:100vh;overflow-x:auto}
+.hdr{max-width:1200px;margin:0 auto 32px}
+.hdr h1{font-family:'Syne',sans-serif;font-size:22px;font-weight:800;color:#fff;letter-spacing:-0.5px}
+.hdr p{font-size:10px;color:var(--muted);letter-spacing:2.5px;text-transform:uppercase;margin-top:4px}
+.page{max-width:1200px;margin:0 auto;display:flex;flex-direction:column;gap:0}
+
+/* layers */
+.layer{border-radius:14px;border:1px solid;position:relative;padding:18px 20px 20px;opacity:0;transform:translateY(14px);animation:fadeUp .5s forwards}
+@keyframes fadeUp{to{opacity:1;transform:none}}
+.layer-tag{position:absolute;top:-10px;left:18px;font-size:9px;font-weight:700;letter-spacing:2.5px;text-transform:uppercase;padding:0 8px;background:var(--bg)}
+.L-consumer{border-color:#1e3d6b;background:linear-gradient(135deg,#080f1e,#0a1525);animation-delay:.06s}
+.L-consumer .layer-tag{color:var(--blue)}
+.L-gateway{border-color:#1a3d28;background:linear-gradient(135deg,#07110d,#0a1a12);margin:14px 0;animation-delay:.18s}
+.L-gateway .layer-tag{color:var(--green)}
+.L-socket-mgmt{border-color:#3d2a08;background:linear-gradient(135deg,#100a02,#180e03);margin:14px 0;animation-delay:.24s}
+.L-socket-mgmt .layer-tag{color:var(--amber)}
+.L-cognigy{border-color:#2a1d4a;background:linear-gradient(135deg,#09060f,#100c1e);animation-delay:.3s}
+.L-cognigy .layer-tag{color:var(--purple)}
+
+.row{display:flex;gap:10px;align-items:stretch;flex-wrap:wrap}
+.box{border-radius:10px;border:1px solid;padding:14px 16px;flex:1;min-width:160px;transition:all .2s;cursor:default}
+.box:hover{transform:translateY(-3px);box-shadow:0 12px 32px rgba(0,0,0,.5)}
+.box-tit{font-size:11px;font-weight:700;margin-bottom:5px}
+.box-sub{font-size:10px;color:var(--dim);line-height:1.6}
+.tag{display:inline-block;font-size:8px;font-weight:700;padding:2px 5px;border-radius:3px;letter-spacing:1.2px;text-transform:uppercase;margin-bottom:7px}
+
+/* box themes */
+.B-consumer{border-color:#1d3861;background:#080f1f}.B-consumer .box-tit{color:var(--blue)}.T-consumer{background:#1d3861;color:var(--blue)}
+.B-handler{border-color:#1a3d28;background:#070f0a}.B-handler .box-tit{color:var(--green)}.T-handler{background:#1a3d28;color:var(--green)}
+.B-adapter{border-color:#3d320a;background:#0f0c03}.B-adapter .box-tit{color:var(--orange)}.T-adapter{background:#3d320a;color:var(--orange)}
+.B-registry{border-color:#3d1212;background:#0f0505}.B-registry .box-tit{color:var(--red)}.T-registry{background:#3d1212;color:var(--red)}
+.B-session{border-color:#2d1e4a;background:#0b0810}.B-session .box-tit{color:var(--purple)}
+.B-normalizer{border-color:#1a3d4a;background:#060e12;flex:2.2}.B-normalizer .box-tit{color:var(--cyan)}.T-norm{background:#1a3d4a;color:var(--cyan)}
+.B-rest{border-color:#2d1e4a;background:#08040f}.B-rest .box-tit{color:var(--purple)}
+.B-cog-sock{border-color:#3d2a0a;background:#0f0a03}.B-cog-sock .box-tit{color:var(--orange)}
+
+/* SOCKET MANAGEMENT specific boxes */
+.B-pool{border-color:#4a3500;background:#110b00}.B-pool .box-tit{color:var(--amber)}.T-pool{background:#4a3500;color:var(--amber)}
+.B-lifecycle{border-color:#3d4a00;background:#0c0f00}.B-lifecycle .box-tit{color:#c8e600}.T-lifecycle{background:#3d4a00;color:#c8e600}
+.B-reconnect{border-color:#4a1500;background:#140500}.B-reconnect .box-tit{color:#ff7043}.T-reconnect{background:#4a1500;color:#ff7043}
+.B-multiplex{border-color:#004a3d;background:#00120e}.B-multiplex .box-tit{color:var(--cyan)}.T-multiplex{background:#004a3d;color:var(--cyan)}
+
+/* state badges */
+.state{display:inline-block;font-size:8px;font-weight:700;padding:1px 6px;border-radius:3px;letter-spacing:1px;margin:2px 2px 0 0}
+.s-idle{background:#0d2718;color:#34d399;border:1px solid #1a4a2a}
+.s-active{background:#2a1a00;color:#fbbf24;border:1px solid #4a3000}
+.s-connecting{background:#001a2a;color:#60a5fa;border:1px solid #003050}
+.s-dead{background:#2a0a0a;color:#f87171;border:1px solid #4a1010}
+
+/* arrows */
+.arrows{display:flex;justify-content:center;gap:48px;padding:10px 0 4px}
+.arr{display:flex;flex-direction:column;align-items:center;gap:3px}
+.arr-lbl{font-size:9px;color:var(--muted);letter-spacing:1px;white-space:nowrap}
+.arr-shaft{width:1px;height:26px;position:relative}
+.arr-shaft::before{content:'';position:absolute;inset:0;background:linear-gradient(to bottom,var(--c),transparent)}
+.arr-shaft::after{content:'▼';position:absolute;bottom:-11px;left:50%;transform:translateX(-50%);font-size:9px;color:var(--c)}
+.ptag{display:inline-block;font-size:8px;font-weight:700;padding:1px 5px;border-radius:3px;letter-spacing:.8px;margin-right:3px}
+.ptag-a2a{background:#1a1d3d;color:var(--purple)}.ptag-rest{background:#3d1212;color:var(--red)}.ptag-sock{background:#1a3d28;color:var(--green)}.ptag-sse{background:#1a3d4a;color:var(--cyan)}.ptag-pool{background:#3d2a00;color:var(--amber)}
+
+.sec{font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);padding-bottom:8px;margin-bottom:10px;border-bottom:1px solid var(--border);margin-top:14px}
+.sec:first-child{margin-top:0}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+.grid4{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px}
+
+/* normalizer rules */
+.norm-rule{display:flex;gap:8px;font-size:9.5px;line-height:1.45;padding:5px 0;border-bottom:1px solid #0e1e28}
+.norm-rule:last-child{border-bottom:none}
+.nr-type{color:var(--orange);min-width:115px;font-weight:600;flex-shrink:0}
+.nr-arrow{color:var(--cyan);flex-shrink:0;margin-top:1px}
+.nr-out .always{color:var(--green);font-weight:600}.nr-out .opt{color:var(--muted)}
+
+/* socket flow diagram */
+.sock-flow{display:flex;flex-direction:column;gap:0;margin-top:10px}
+.sf-row{display:flex;align-items:flex-start;gap:8px;padding:6px 0;border-bottom:1px solid #0e1a0a;font-size:9.5px}
+.sf-row:last-child{border-bottom:none}
+.sf-icon{width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0;margin-top:1px}
+.sf-label{color:var(--amber);font-weight:700;min-width:120px;flex-shrink:0}
+.sf-detail{color:var(--dim);line-height:1.55}
+.sf-detail code{color:var(--cyan);font-size:9px}
+
+/* backoff viz */
+.backoff{display:flex;align-items:flex-end;gap:4px;margin-top:8px;height:36px}
+.ba-bar{background:linear-gradient(to top,#fb923c,#fbbf24);border-radius:2px 2px 0 0;flex:1}
+.ba-lbl{font-size:8px;color:var(--amber);text-align:center;margin-top:3px}
+.backoff-wrap{display:flex;flex-direction:column}
+
+/* pool matrix */
+.pool-matrix{margin-top:10px;font-size:9px}
+.pm-row{display:flex;gap:4px;margin-bottom:3px;align-items:center}
+.pm-label{width:90px;color:var(--dim);flex-shrink:0;font-size:8.5px}
+.pm-cell{width:70px;height:20px;border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:700;letter-spacing:.5px;flex-shrink:0}
+.pm-active{background:#1a3d20;color:#34d399;border:1px solid #2a5a30}
+.pm-idle{background:#1a1a0a;color:#6b7280;border:1px solid #2a2a15}
+.pm-hdr{color:var(--muted);font-size:8px;font-weight:700;letter-spacing:1px}
+
+@keyframes glow{0%,100%{box-shadow:0 0 0 rgba(34,211,238,0)}50%{box-shadow:0 0 20px rgba(34,211,238,.12)}}
+.B-normalizer{animation:glow 3s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:.7}50%{opacity:1}}
+.L-socket-mgmt{animation:fadeUp .5s .24s forwards,borderPulse 3s 1s ease-in-out infinite}
+@keyframes borderPulse{0%,100%{border-color:#3d2a08}50%{border-color:#7a5510}}
+
+.legend{max-width:1200px;margin:22px auto 0;display:flex;flex-wrap:wrap;gap:16px}
+.leg{display:flex;align-items:center;gap:6px;font-size:9.5px;color:var(--dim)}
+.leg-dot{width:10px;height:10px;border-radius:2px}
+
+.new-badge{display:inline-block;font-size:7.5px;font-weight:700;padding:1px 5px;border-radius:2px;background:#3d2a08;color:#fbbf24;letter-spacing:1px;text-transform:uppercase;margin-left:6px;vertical-align:middle}
+
+/* ── LIGHT MODE ── */
+html.light {
+  --bg:#f0f4f8;--s1:#e2e8f0;--s2:#dde4ed;
+  --border:#cbd5e1;
+  --blue:#1d4ed8;--cyan:#0e7490;--green:#047857;
+  --orange:#c2410c;--purple:#6d28d9;--red:#b91c1c;--amber:#92400e;
+  --txt:#1e293b;--muted:#64748b;--dim:#475569;
+}
+html.light body { background:var(--bg); color:var(--txt); }
+html.light .layer-tag { background:var(--bg); }
+html.light .hdr h1 { color:#0f172a; }
+
+html.light .L-consumer { border-color:#bfdbfe; background:linear-gradient(135deg,#eff6ff,#dbeafe); }
+html.light .L-gateway  { border-color:#bbf7d0; background:linear-gradient(135deg,#f0fdf4,#dcfce7); }
+html.light .L-socket-mgmt { border-color:#fde68a; background:linear-gradient(135deg,#fffbeb,#fef3c7); }
+html.light .L-cognigy  { border-color:#ddd6fe; background:linear-gradient(135deg,#faf5ff,#ede9fe); }
+
+html.light .box { background:#fff; border-color:#e2e8f0; }
+html.light .box:hover { box-shadow:0 8px 24px rgba(0,0,0,.12); }
+html.light .box-sub { color:#475569; }
+
+html.light .B-consumer { background:#f0f7ff; border-color:#bfdbfe; }
+html.light .B-handler  { background:#f0fdf4; border-color:#bbf7d0; }
+html.light .B-adapter  { background:#fff7ed; border-color:#fed7aa; }
+html.light .B-registry { background:#fff5f5; border-color:#fecaca; }
+html.light .B-session  { background:#faf5ff; border-color:#ddd6fe; }
+html.light .B-normalizer { background:#f0fdff; border-color:#a5f3fc; }
+html.light .B-rest     { background:#faf5ff; border-color:#ddd6fe; }
+html.light .B-cog-sock { background:#fff7ed; border-color:#fed7aa; }
+html.light .B-pool     { background:#fffbeb; border-color:#fde68a; }
+html.light .B-lifecycle{ background:#f7fee7; border-color:#d9f99d; }
+html.light .B-reconnect{ background:#fff5f0; border-color:#fdba74; }
+html.light .B-multiplex{ background:#f0fdfa; border-color:#99f6e4; }
+
+html.light .T-consumer { background:#bfdbfe; color:#1d4ed8; }
+html.light .T-handler  { background:#bbf7d0; color:#047857; }
+html.light .T-adapter  { background:#fed7aa; color:#c2410c; }
+html.light .T-registry { background:#fecaca; color:#b91c1c; }
+html.light .T-norm     { background:#a5f3fc; color:#0e7490; }
+html.light .T-pool     { background:#fde68a; color:#92400e; }
+html.light .T-lifecycle{ background:#d9f99d; color:#3f6212; }
+html.light .T-reconnect{ background:#fdba74; color:#c2410c; }
+html.light .T-multiplex{ background:#99f6e4; color:#0f766e; }
+
+html.light .sec { color:#64748b; border-color:#e2e8f0; }
+html.light .norm-rule { border-color:#e2e8f0; }
+html.light .nr-out .opt { color:#94a3b8; }
+html.light .sf-row { border-color:#e8f0e8; }
+html.light .sf-detail { color:#475569; }
+html.light .sf-detail code { color:#0e7490; }
+html.light .arr-lbl { color:#64748b; }
+html.light .ptag-a2a { background:#e0e7ff; color:#4338ca; }
+html.light .ptag-rest { background:#fee2e2; color:#b91c1c; }
+html.light .ptag-sock { background:#dcfce7; color:#047857; }
+html.light .ptag-sse  { background:#cffafe; color:#0e7490; }
+html.light .ptag-pool { background:#fef3c7; color:#92400e; }
+html.light .pool-matrix .pm-active { background:#dcfce7; border-color:#86efac; color:#14532d; }
+html.light .pool-matrix .pm-idle   { background:#f1f5f9; border-color:#cbd5e1; color:#94a3b8; }
+html.light .pool-matrix .pm-label  { color:#64748b; }
+html.light .pool-matrix .pm-hdr    { color:#94a3b8; }
+html.light .s-idle     { background:#dcfce7; color:#14532d; border-color:#86efac; }
+html.light .s-active   { background:#fef3c7; color:#713f12; border-color:#fde68a; }
+html.light .s-connecting { background:#dbeafe; color:#1e3a8a; border-color:#93c5fd; }
+html.light .s-dead     { background:#fee2e2; color:#7f1d1d; border-color:#fca5a5; }
+html.light .legend { }
+html.light .leg { color:#475569; }
+html.light .new-badge { background:#fef3c7; color:#92400e; }
+html.light .B-normalizer { animation:glow-light 3s ease-in-out infinite; }
+@keyframes glow-light { 0%,100%{box-shadow:0 0 0 rgba(14,116,144,0)}50%{box-shadow:0 0 16px rgba(14,116,144,.18)} }
+html.light .L-socket-mgmt { animation:fadeUp .5s .24s forwards, borderPulse-light 3s 1s ease-in-out infinite; }
+@keyframes borderPulse-light { 0%,100%{border-color:#fde68a}50%{border-color:#f59e0b} }
+
+/* ── TOGGLE BUTTON ── */
+#theme-toggle {
+  position:fixed;top:18px;right:22px;z-index:1000;
+  background:var(--s1);border:1px solid var(--border);
+  border-radius:100px;padding:6px 14px 6px 10px;
+  display:flex;align-items:center;gap:7px;cursor:pointer;
+  font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:700;
+  color:var(--txt);letter-spacing:.5px;
+  transition:all .25s;box-shadow:0 2px 12px rgba(0,0,0,.2);
+}
+#theme-toggle:hover { transform:translateY(-1px); box-shadow:0 4px 20px rgba(0,0,0,.3); }
+#theme-toggle .ico { font-size:14px; line-height:1; }
+html.light #theme-toggle { background:#fff; box-shadow:0 2px 12px rgba(0,0,0,.1); }
+
+</style>
+</head>
+<body>
+
+<button id="theme-toggle" onclick="toggleTheme()" title="Light/Dark Mode umschalten">
+  <span class="ico" id="toggle-ico">☀️</span>
+  <span id="toggle-lbl">Light Mode</span>
+</button>
+<script>
+(function(){
+  const saved = localStorage.getItem('theme') || 'dark';
+  if(saved === 'light') { document.documentElement.classList.add('light'); updateBtn('light'); }
+  function updateBtn(t){
+    const ico = document.getElementById('toggle-ico');
+    const lbl = document.getElementById('toggle-lbl');
+    if(!ico || !lbl) return;
+    if(t==='light'){ ico.textContent='🌙'; lbl.textContent='Dark Mode'; }
+    else { ico.textContent='☀️'; lbl.textContent='Light Mode'; }
+  }
+  window.toggleTheme = function(){
+    const isLight = document.documentElement.classList.toggle('light');
+    const t = isLight ? 'light' : 'dark';
+    localStorage.setItem('theme', t);
+    updateBtn(t);
+  };
+})();
+</script>
+
+<div class="hdr">
+  <h1>Cognigy A2A Gateway — Architecture <span style="font-size:12px;color:var(--amber);font-family:'IBM Plex Mono'">+ Socket Connection Management</span></h1>
+  <p>TypeScript · @a2a-js/sdk · @cognigy/socket-client · axios</p>
+</div>
+<div class="page">
+
+  <!-- LAYER 1: CONSUMERS -->
+  <div class="layer L-consumer">
+    <span class="layer-tag">Layer 1 — A2A Consumers</span>
+    <div class="row">
+      <div class="box B-consumer">
+        <div class="tag T-consumer">LLM Agent</div>
+        <div class="box-tit">Orchestrator Agent</div>
+        <div class="box-sub">LLM-basiert · liest TextPart semantisch · DataPart optional für strukturierte Verarbeitung</div>
+      </div>
+      <div class="box B-consumer">
+        <div class="tag T-consumer">Human UI</div>
+        <div class="box-tit">Copilot / Agent Assist</div>
+        <div class="box-sub">TextPart als Fallback · DataPart für natives Rendering: Buttons, AdaptiveCards, Gallery</div>
+      </div>
+      <div class="box B-consumer">
+        <div class="tag T-consumer">A2A Agent</div>
+        <div class="box-tit">Anderer AI Agent</div>
+        <div class="box-sub">TextPart = universelle Sprache · keine Cognigy-Typ-Kenntnis nötig · voll interoperabel</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ARROW 1 -->
+  <div class="arrows">
+    <div class="arr">
+      <div class="arr-lbl"><span class="ptag ptag-a2a">A2A</span>JSON-RPC Request</div>
+      <div class="arr-shaft" style="--c:var(--blue)"></div>
+    </div>
+    <div class="arr">
+      <div class="arr-lbl"><span class="ptag ptag-sse">SSE</span>Streaming Response</div>
+      <div class="arr-shaft" style="--c:var(--cyan)"></div>
+    </div>
+  </div>
+
+  <!-- LAYER 2: GATEWAY -->
+  <div class="layer L-gateway">
+    <span class="layer-tag">Layer 2 — A2A Gateway Service — TypeScript / Express</span>
+
+    <div class="sec">① Discovery & Routing</div>
+    <div class="row" style="margin-bottom:4px">
+      <div class="box B-registry" style="flex:auto">
+        <div class="tag T-registry">Config</div>
+        <div class="box-tit">Agent Registry — agents.config.json</div>
+        <div class="box-sub">GET /agents/{id}/.well-known/agent-card.json → AgentCard dynamisch generiert · Neuer Agent = nur Config-Eintrag · endpointType: "REST" | "SOCKET"</div>
+      </div>
+      <div class="box B-session" style="flex:none;min-width:190px">
+        <div class="box-tit">Session Store</div>
+        <div class="box-sub">a2a.contextId = cognigy.sessionId<br>1:1 Mapping direkt<br>userId = "a2a-gateway" (fix)<br>Map (Prototype) · Redis (Prod)</div>
+      </div>
+    </div>
+
+    <div class="sec">② A2A Protocol Handler</div>
+    <div class="row" style="margin-bottom:4px">
+      <div class="box B-handler">
+        <div class="tag T-handler">@a2a-js/sdk</div>
+        <div class="box-tit">DefaultRequestHandler</div>
+        <div class="box-sub">InMemoryTaskStore · AgentCard Provider · JSON-RPC parsing · SSE lifecycle</div>
+      </div>
+      <div class="box B-handler">
+        <div class="tag T-handler">implements</div>
+        <div class="box-tit">CognigyAgentExecutor</div>
+        <div class="box-sub">AgentExecutor interface<br>execute(ctx, eventBus)<br>cancelTask(taskId)<br>→ wählt Adapter via Registry</div>
+      </div>
+    </div>
+
+    <div class="sec">③ Cognigy Adapter Layer</div>
+    <div class="row" style="margin-bottom:4px">
+      <div class="box B-adapter">
+        <div class="tag T-adapter">axios</div>
+        <div class="box-tit">REST Adapter</div>
+        <div class="box-sub">Standalone Flow · sync<br>POST endpoint-url · max 8s<br>response: outputStack[]<br>→ kein Connection Management nötig</div>
+      </div>
+      <div class="box B-adapter" style="border-color:#7a5510">
+        <div class="tag T-adapter">@cognigy/socket-client</div>
+        <div class="box-tit">Socket Adapter <span class="new-badge">CONNECTION MGT</span></div>
+        <div class="box-sub">Agentic Flow · LLM + Tools<br>→ nutzt Connection Pool (Layer 2b)<br>on("output") → stream live<br>on("finalPing") → Task done</div>
+      </div>
+    </div>
+
+    <div class="sec">④ Output Normalizer — Kernregel: Jeder Cognigy-Typ → TextPart (IMMER) + DataPart (optional)</div>
+    <div class="row">
+      <div class="box B-normalizer">
+        <div class="tag T-norm">⚡ OutputNormalizer</div>
+        <div class="box-tit">normalize(cognigyOutput) → A2APart[]</div>
+        <div class="norm-rule"><span class="nr-type">text (plain)</span><span class="nr-arrow">→</span><span class="nr-out"><span class="always">TextPart</span>: text direkt · kein DataPart</span></div>
+        <div class="norm-rule"><span class="nr-type">_quickReplies</span><span class="nr-arrow">→</span><span class="nr-out"><span class="always">TextPart</span>: "Bitte wähle: Option A, Option B" · <span class="opt">DataPart</span>: {type:"quickReplies", options:[...]}</span></div>
+        <div class="norm-rule"><span class="nr-type">_gallery</span><span class="nr-arrow">→</span><span class="nr-out"><span class="always">TextPart</span>: "Karte 1: Titel – URL, ..." · <span class="opt">DataPart</span>: {type:"gallery", items:[...]}</span></div>
+        <div class="norm-rule"><span class="nr-type">_adaptiveCard</span><span class="nr-arrow">→</span><span class="nr-out"><span class="always">TextPart</span>: "Formular: Feld A=?, Feld B=?" · <span class="opt">DataPart</span>: {type:"adaptiveCard", schema:{...}}</span></div>
+        <div class="norm-rule"><span class="nr-type">_buttons / _list</span><span class="nr-arrow">→</span><span class="nr-out"><span class="always">TextPart</span>: "[1] Label A  [2] Label B" · <span class="opt">DataPart</span>: {type:"buttons"|"list", items:[...]}</span></div>
+        <div class="norm-rule"><span class="nr-type">_fallbackText</span><span class="nr-arrow">→</span><span class="nr-out"><span class="always">TextPart</span>: _fallbackText als Fallback wenn text=null</span></div>
+        <div class="norm-rule"><span class="nr-type">custom data</span><span class="nr-arrow">→</span><span class="nr-out"><span class="always">TextPart</span>: JSON.stringify summary · <span class="opt">DataPart</span>: raw object direkt</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <!-- LAYER 2b: SOCKET CONNECTION MANAGEMENT -->
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <div class="layer L-socket-mgmt">
+    <span class="layer-tag">Layer 2b — Socket Connection Management <span class="new-badge">NEU</span></span>
+
+    <div class="grid2" style="gap:12px">
+
+      <!-- CONNECTION POOL -->
+      <div>
+        <div class="sec" style="margin-top:0">① Connection Pool — SocketConnectionPool</div>
+        <div class="box B-pool" style="min-height:180px">
+          <div class="tag T-pool">Pool Strategy</div>
+          <div class="box-tit">1 Connection pro Agent-Endpoint</div>
+          <div class="box-sub" style="margin-bottom:10px">Nicht 1 Connection pro Request — eine stabile, persistente Verbindung pro Cognigy-Endpoint, die für ALLE parallelen Sessions desselben Agents genutzt wird.</div>
+
+          <!-- Pool Matrix -->
+          <div class="pool-matrix">
+            <div class="pm-row">
+              <div class="pm-label"></div>
+              <div class="pm-cell pm-hdr">booking-agent</div>
+              <div class="pm-cell pm-hdr">billing-agent</div>
+            </div>
+            <div class="pm-row">
+              <div class="pm-label" style="color:var(--amber)">WS Connection</div>
+              <div class="pm-cell pm-active">● ACTIVE</div>
+              <div class="pm-cell pm-idle">○ IDLE</div>
+            </div>
+            <div class="pm-row">
+              <div class="pm-label">Session ctx-001</div>
+              <div class="pm-cell pm-active">↔ aktiv</div>
+              <div class="pm-cell pm-idle">—</div>
+            </div>
+            <div class="pm-row">
+              <div class="pm-label">Session ctx-002</div>
+              <div class="pm-cell pm-active">↔ aktiv</div>
+              <div class="pm-cell pm-idle">—</div>
+            </div>
+            <div class="pm-row">
+              <div class="pm-label">Session ctx-003</div>
+              <div class="pm-cell pm-idle">wartend</div>
+              <div class="pm-cell pm-idle">—</div>
+            </div>
+          </div>
+          <div style="margin-top:8px;font-size:9px;color:var(--muted)">→ Viele Sessions teilen 1 Connection (Multiplexing via sessionId)</div>
+        </div>
+      </div>
+
+      <!-- RECONNECT LOGIC -->
+      <div>
+        <div class="sec" style="margin-top:0">② Reconnect Logic — Exponential Backoff</div>
+        <div class="box B-reconnect" style="min-height:180px">
+          <div class="tag T-reconnect">Auto-Reconnect</div>
+          <div class="box-tit">Exponential Backoff + Jitter</div>
+          <div class="sock-flow">
+            <div class="sf-row">
+              <div class="sf-icon" style="background:#1a0500">🔴</div>
+              <div><div class="sf-label" style="color:#ff7043">Disconnect erkannt</div><div class="sf-detail"><code>on("disconnect")</code> Event · Grund klassifiziert: network / server / auth</div></div>
+            </div>
+            <div class="sf-row">
+              <div class="sf-icon" style="background:#150b00">⏱</div>
+              <div><div class="sf-label" style="color:#fbbf24">Attempt 1: 1s</div><div class="sf-detail">Sofort · wahrscheinlich transient</div></div>
+            </div>
+            <div class="sf-row">
+              <div class="sf-icon" style="background:#150b00">⏱</div>
+              <div><div class="sf-label" style="color:#fbbf24">Attempt 2: 2s</div><div class="sf-detail">Doppelt · + zufälliger Jitter ±20%</div></div>
+            </div>
+            <div class="sf-row">
+              <div class="sf-icon" style="background:#150b00">⏱</div>
+              <div><div class="sf-label" style="color:#fbbf24">Attempt 3–5: 4s→30s</div><div class="sf-detail">Max 30s Cap · danach Error propagiert</div></div>
+            </div>
+            <div class="sf-row">
+              <div class="sf-icon" style="background:#0a1200">✅</div>
+              <div><div class="sf-label" style="color:#34d399">Reconnected</div><div class="sf-detail">Pending Messages werden re-sent · Sessions wiederhergestellt</div></div>
+            </div>
+          </div>
+          <div style="margin-top:8px;font-size:9px;color:var(--muted)">Auth-Fehler → kein Retry (fail fast) · Network-Fehler → Retry</div>
+        </div>
+      </div>
+
+      <!-- LIFECYCLE STATES -->
+      <div>
+        <div class="sec" style="margin-top:0">③ Connection Lifecycle — State Machine</div>
+        <div class="box B-lifecycle">
+          <div class="tag T-lifecycle">State Machine</div>
+          <div class="box-tit">Connection States</div>
+          <div class="sock-flow">
+            <div class="sf-row">
+              <div class="sf-icon" style="background:#001a2a">🔵</div>
+              <div><div class="sf-label" style="color:#60a5fa">CONNECTING</div><div class="sf-detail">SocketClient.connect() · Token-Auth läuft · Timeout: 5s</div></div>
+            </div>
+            <div class="sf-row">
+              <div class="sf-icon" style="background:#002010">🟢</div>
+              <div><div class="sf-label" style="color:#34d399">IDLE</div><div class="sf-detail">Verbunden · keine aktive Session · keepalive ping alle 30s</div></div>
+            </div>
+            <div class="sf-row">
+              <div class="sf-icon" style="background:#1a1000">🟡</div>
+              <div><div class="sf-label" style="color:#fbbf24">ACTIVE</div><div class="sf-detail">≥1 Session läuft · Nachrichten fließen · finalPing erwartet</div></div>
+            </div>
+            <div class="sf-row">
+              <div class="sf-icon" style="background:#1a0000">🔴</div>
+              <div><div class="sf-label" style="color:#f87171">DEAD</div><div class="sf-detail">Max Retries erreicht · aus Pool entfernt · alle Sessions failed</div></div>
+            </div>
+          </div>
+          <div style="margin-top:8px;font-size:9px;color:var(--muted)">IDLE → gelöscht nach 5min Inaktivität (konfigurierbar)</div>
+        </div>
+      </div>
+
+      <!-- SESSION MULTIPLEXING -->
+      <div>
+        <div class="sec" style="margin-top:0">④ Session Multiplexing — Eine Connection, N Sessions</div>
+        <div class="box B-multiplex">
+          <div class="tag T-multiplex">Multiplexing</div>
+          <div class="box-tit">sessionId als Routing-Key</div>
+          <div class="box-sub" style="margin-bottom:10px">
+            @cognigy/socket-client isoliert Sessions via <code style="color:var(--cyan)">sessionId</code>. Cognigy routet jeden Output zurück zur richtigen Session. Das Gateway mappt sessionId → A2A-TaskId → SSE-Stream.
+          </div>
+          <div class="sock-flow">
+            <div class="sf-row">
+              <div class="sf-icon" style="background:#001a15">↔</div>
+              <div><div class="sf-label" style="color:var(--cyan)">WS Connection</div><div class="sf-detail">Eine persistente TCP-Verbindung zum Endpoint</div></div>
+            </div>
+            <div class="sf-row">
+              <div class="sf-icon" style="background:#001a15">①</div>
+              <div><div class="sf-label" style="color:#94e8d0">Session ctx-001</div><div class="sf-detail"><code>sendMessage(text, {sessionId:"ctx-001"})</code></div></div>
+            </div>
+            <div class="sf-row">
+              <div class="sf-icon" style="background:#001a15">②</div>
+              <div><div class="sf-label" style="color:#94e8d0">Session ctx-002</div><div class="sf-detail"><code>sendMessage(text, {sessionId:"ctx-002"})</code></div></div>
+            </div>
+            <div class="sf-row">
+              <div class="sf-icon" style="background:#001520">←</div>
+              <div><div class="sf-label" style="color:var(--cyan)">Output-Routing</div><div class="sf-detail">on("output") prüft sessionId → dispatcht an korrekten SSE-Stream</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ARROW DOWN 2 -->
+  <div class="arrows">
+    <div class="arr">
+      <div class="arr-lbl"><span class="ptag ptag-rest">REST</span>axios · HTTP POST · sync</div>
+      <div class="arr-shaft" style="--c:var(--orange)"></div>
+    </div>
+    <div class="arr">
+      <div class="arr-lbl"><span class="ptag ptag-pool">POOL</span>Persistent WS · Multiplexed</div>
+      <div class="arr-shaft" style="--c:var(--amber)"></div>
+    </div>
+  </div>
+
+  <!-- LAYER 3: COGNIGY -->
+  <div class="layer L-cognigy">
+    <span class="layer-tag">Layer 3 — Cognigy.AI Platform</span>
+    <div class="grid2">
+      <div class="box B-rest">
+        <div class="tag" style="background:#2d1e4a;color:var(--purple)">REST ENDPOINT</div>
+        <div class="box-tit">Standalone Flow</div>
+        <div class="box-sub">Deterministisch · Intent-basiert<br>Response: outputStack[]<br>Timeout: max 8 Sekunden<br>Use case: FAQ, einfache Queries</div>
+      </div>
+      <div class="box B-cog-sock">
+        <div class="tag" style="background:#3d2a0a;color:var(--orange)">SOCKET.IO ENDPOINT</div>
+        <div class="box-tit">Agentic AI Flow</div>
+        <div class="box-sub">LLM Reasoning · Tool Calls · MCP<br>emit("output") mehrfach live<br>emit("finalPing") → Flow fertig<br>Use case: Booking, Complex Tasks</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="legend">
+  <div class="leg"><div class="leg-dot" style="background:#1e3d6b"></div>Consumer Layer</div>
+  <div class="leg"><div class="leg-dot" style="background:#1a3d28"></div>Gateway Service</div>
+  <div class="leg"><div class="leg-dot" style="background:#3d2a08"></div>Socket Connection Management (NEU)</div>
+  <div class="leg"><div class="leg-dot" style="background:#2a1d4a"></div>Cognigy Platform</div>
+  <div class="leg"><span class="ptag ptag-a2a">A2A</span>JSON-RPC / SSE</div>
+  <div class="leg"><span class="ptag ptag-pool">POOL</span>Persistente WS · Multiplexed Sessions</div>
+</div>
+</body>
+</html>
