@@ -147,11 +147,23 @@ describe('AgentRegistry', () => {
       expect(card.protocolVersion).toBe('0.3.0');
       expect(card.version).toBe('1.0.0');
       expect(card.url).toBe('https://gateway.example.com/agents/test-agent/');
+      // MOCK_CONFIG_SINGLE uses endpointType:'REST' → streaming:false
       expect(card.capabilities).toEqual({
-        streaming: true,
+        streaming: false,
         pushNotifications: false,
         stateTransitionHistory: false,
       });
+    });
+
+    it('sets streaming:true for SOCKET agents and streaming:false for REST agents', () => {
+      mockLoadAgentsConfig.mockReturnValue([MOCK_CONFIG_SINGLE, MOCK_CONFIG_SECOND]);
+      const registry = new AgentRegistry();
+
+      const restCard = registry.getAgentCard('test-agent')!;   // REST
+      const socketCard = registry.getAgentCard('second-agent')!; // SOCKET
+
+      expect(restCard.capabilities.streaming).toBe(false);
+      expect(socketCard.capabilities.streaming).toBe(true);
     });
 
     it('maps skills correctly to AgentCard skills', () => {

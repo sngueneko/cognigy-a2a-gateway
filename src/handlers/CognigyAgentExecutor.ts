@@ -1,38 +1,50 @@
 /**
  * @fileoverview CognigyAgentExecutor — task-aware, streaming A2A AgentExecutor.
  *
- * Streaming strategy (SocketAdapter)
- * ────────────────────────────────────────────────────────────────────────────
- * Each Cognigy `output` event is published to the A2A eventBus immediately as
- * a TaskArtifactUpdateEvent so callers receive partial results progressively:
+ * ## Event routing strategy
  *
- *   TaskStatusUpdateEvent { state: 'working',   final: false }
- *   ArtifactUpdateEvent   { output 1 }
- *   ArtifactUpdateEvent   { output 2 }
- *   ...
- *   ArtifactUpdateEvent   { output N }
- *   TaskStatusUpdateEvent { state: 'completed', final: true }
- *   eventBus.finished()
+ * The executor routes each Cognigy output to the correct A2A event type based
+ * on the `NormalizedOutput.kind` produced by OutputNormalizer:
  *
- * Each output gets its OWN artifact (unique artifactId) so rich clients can
- * render them independently (text bubble, quick-replies card, etc).
- * The task is closed with a terminal TaskStatusUpdateEvent — no Message is
- * published for SOCKET agents.
+ * ### `status-message` outputs (text, quick replies, buttons, lists, galleries, cards)
+ * → Published as `TaskStatusUpdateEvent { state: 'working', message: { parts } }`
+ * These are intermediate conversational outputs that carry message content.
+ * An LLM agent reading the stream always gets the full human-readable TextPart.
+ * A rich UI client additionally reads the DataPart for structured rendering.
  *
- * Non-streaming (RestAdapter)
- * ────────────────────────────────────────────────────────────────────────────
- * REST returns all outputs at once. No task lifecycle events are needed —
- * we publish a single final Message directly.
+ * ### `artifact` outputs (image, audio, video)
+ * → Published as `TaskArtifactUpdateEvent` with `FilePart { uri, mimeType, name }`
+ * These are binary media files. The artifact name and MIME type come from the
+ * pre-computed `ArtifactOutput.name` and `ArtifactOutput.mimeType` fields.
+ * A short TextPart `[Image: url]` / `[Audio: url]` / `[Video: url]` is included
+ * as a fallback so LLM agents can reference the file in their reasoning.
  *
- *   Message { parts: [...all outputs...] }
- *   eventBus.finished()
+ * ## Full event sequences
  *
- * Task terminal states
- * ────────────────────────────────────────────────────────────────────────────
- *   Success   →  TaskStatusUpdateEvent { state: 'completed', final: true }
- *   Cancelled →  TaskStatusUpdateEvent { state: 'canceled',  final: true }
- *   Error     →  TaskStatusUpdateEvent { state: 'failed',    final: true }  (SOCKET)
- *              →  Message { error text }                                     (REST)
+ * ### SOCKET adapter (streaming)
+ * ```
+ * TaskStatusUpdateEvent { state: 'working',   final: false }           ← task opened
+ * TaskStatusUpdateEvent { state: 'working',   final: false, message }  ← per text/UI output
+ * TaskArtifactUpdateEvent { FilePart image/audio/video }               ← per media output
+ * ...
+ * TaskStatusUpdateEvent { state: 'completed', final: true }            ← task closed
+ * eventBus.finished()
+ * ```
+ *
+ * ### REST adapter (synchronous)
+ * ```
+ * Message { parts: [...all outputs flattened...] }                     ← single response
+ * eventBus.finished()
+ * ```
+ * REST has no task lifecycle — a single Message carries all parts.
+ * Media outputs in REST are included inline as FilePart + TextPart.
+ *
+ * ## Terminal states (SOCKET only)
+ * | Scenario          | state       |
+ * |-------------------|-------------|
+ * | Normal completion | `completed` |
+ * | Task cancelled    | `canceled`  |
+ * | Adapter error     | `failed`    |
  */
 
 import { v4 as uuidv4 } from 'uuid';
@@ -44,6 +56,7 @@ import { AdapterError } from '../adapters/IAdapter';
 import { RestAdapter } from '../adapters/RestAdapter';
 import { SocketAdapter } from '../adapters/SocketAdapter';
 import { normalizeOutput, normalizeOutputs } from '../normalizer/OutputNormalizer';
+import type { NormalizedOutput } from '../normalizer/OutputNormalizer';
 import type { CognigyBaseOutput } from '../types/cognigy.types';
 import type { ResolvedAgentConfig } from '../types/agent.types';
 import { taskSessionRegistry } from '../task/TaskSessionRegistry';
@@ -80,48 +93,85 @@ export class CognigyAgentExecutor implements AgentExecutor {
     );
 
     try {
-      // SOCKET: publish working status to open the task lifecycle
-      // REST: no task lifecycle needed
       if (isSocket) {
+        // Open the task lifecycle with a working status (no message yet)
         this.publishWorking(eventBus, taskId, contextId);
       }
 
       const data = this.extractCognigyData(requestContext);
+      let statusMessageCount = 0;
+      let artifactCount = 0;
 
-      // Build streaming callback for SocketAdapter.
-      // Each Cognigy output event is immediately published as a TaskArtifactUpdateEvent.
-      // RestAdapter ignores onOutput — it returns all outputs at once.
-      const artifactId = uuidv4();
-      let outputCount = 0;
-      // Buffer published artifact events so we can mark the last one lastChunk:true
-      const publishedArtifacts: TaskArtifactUpdateEvent[] = [];
-
+      /**
+       * SocketAdapter streaming callback.
+       *
+       * Called once per Cognigy output event as it arrives, before finalPing.
+       * Routes the output to the correct A2A event type:
+       *   - status-message → TaskStatusUpdateEvent { state:'working', message }
+       *   - artifact       → TaskArtifactUpdateEvent { FilePart }
+       *
+       * RestAdapter ignores this callback — it returns all outputs at once.
+       */
       const onOutput: OutputCallback = (output: CognigyBaseOutput, index: number) => {
         if (controller.signal.aborted) return;
 
-        const parts = normalizeOutput(output, index);
-        if (parts.length === 0) return;
+        let normalized: NormalizedOutput;
+        try {
+          normalized = normalizeOutput(output, index);
+        } catch (err) {
+          log.error({ agentId: this.agentId, taskId, index, err }, 'normalizeOutput threw — skipping output');
+          return;
+        }
 
-        const event: TaskArtifactUpdateEvent = {
-          kind: 'artifact-update',
-          taskId,
-          contextId,
-          artifact: {
-            artifactId: `${artifactId}-${index}`,
-            parts: parts as Part[],
-          },
-          append: false,
-          lastChunk: false, // will be corrected for the final artifact below
-        };
+        if (normalized.kind === 'status-message') {
+          // Conversational / UI output → working status with message
+          const event: TaskStatusUpdateEvent = {
+            kind: 'status-update',
+            taskId,
+            contextId,
+            status: {
+              state: 'working',
+              timestamp: new Date().toISOString(),
+              message: {
+                kind: 'message',
+                messageId: uuidv4(),
+                role: 'agent',
+                parts: normalized.parts as Part[],
+                contextId,
+                taskId,
+              },
+            },
+            final: false,
+          };
+          eventBus.publish(event);
+          statusMessageCount++;
 
-        eventBus.publish(event);
-        publishedArtifacts.push(event);
-        outputCount++;
+          log.debug(
+            { agentId: this.agentId, taskId, index, partCount: normalized.parts.length, event: 'status.message.published' },
+            'Published working status with message',
+          );
+        } else {
+          // Binary media output → artifact update
+          const event: TaskArtifactUpdateEvent = {
+            kind: 'artifact-update',
+            taskId,
+            contextId,
+            artifact: {
+              artifactId: uuidv4(),
+              name: normalized.name,
+              parts: normalized.parts as Part[],
+            },
+            append: false,
+            lastChunk: true, // each media file is its own complete artifact
+          };
+          eventBus.publish(event);
+          artifactCount++;
 
-        log.debug(
-          { agentId: this.agentId, taskId, index, event: 'artifact.partial' },
-          'Published partial artifact',
-        );
+          log.debug(
+            { agentId: this.agentId, taskId, index, mimeType: normalized.mimeType, name: normalized.name, event: 'artifact.published' },
+            'Published media artifact',
+          );
+        }
       };
 
       const outputs = await this.adapter.send({
@@ -141,24 +191,10 @@ export class CognigyAgentExecutor implements AgentExecutor {
       }
 
       if (isSocket) {
-        // Mark the last artifact as lastChunk:true now that we know it's the last one
-        const lastArtifact = publishedArtifacts[publishedArtifacts.length - 1];
-        if (lastArtifact) {
-          const finalArtifact: TaskArtifactUpdateEvent = {
-            ...lastArtifact,
-            lastChunk: true,
-          };
-          eventBus.publish(finalArtifact);
-          log.debug(
-            { agentId: this.agentId, taskId, artifactId: lastArtifact.artifact.artifactId, event: 'artifact.final' },
-            'Published final artifact (lastChunk:true)',
-          );
-        }
-
-        // SOCKET: close the task with a completed status — no Message needed
+        // Close the task with completed status
         this.publishCompleted(eventBus, taskId, contextId);
       } else {
-        // REST: publish the complete assembled Message — no task lifecycle
+        // REST: publish single Message with all parts flattened
         const allParts = normalizeOutputs(outputs);
         const responseMessage: Message = {
           kind: 'message',
@@ -178,7 +214,8 @@ export class CognigyAgentExecutor implements AgentExecutor {
           agentId: this.agentId,
           sessionId: contextId,
           durationMs: Date.now() - startMs,
-          artifactCount: outputCount,
+          statusMessageCount,
+          artifactCount,
           adapterType: this.adapter.type,
           event: 'session.ended',
         },
@@ -198,10 +235,8 @@ export class CognigyAgentExecutor implements AgentExecutor {
       );
 
       if (isSocket) {
-        // SOCKET: close the task with failed status
         this.publishFailed(eventBus, taskId, contextId);
       } else {
-        // REST: no task to close, publish an error Message
         const errorMessage: Message = {
           kind: 'message',
           messageId: uuidv4(),
@@ -227,7 +262,6 @@ export class CognigyAgentExecutor implements AgentExecutor {
     );
 
     if (!signalled) {
-      // Task is not in-flight — publish canceled immediately
       const event: TaskStatusUpdateEvent = {
         kind: 'status-update',
         taskId,
@@ -238,10 +272,9 @@ export class CognigyAgentExecutor implements AgentExecutor {
       eventBus.publish(event);
       eventBus.finished();
     }
-    // If signalled: the execute() path will detect abort and publish canceled itself
   };
 
-  // ─── Private ──────────────────────────────────────────────────────────────
+  // ─── Private helpers ──────────────────────────────────────────────────────
 
   private createAdapter(config: ResolvedAgentConfig): IAdapter {
     switch (config.endpointType) {
@@ -262,6 +295,8 @@ export class CognigyAgentExecutor implements AgentExecutor {
     }
     return '';
   }
+
+  // ─── Public helpers (exposed for tests) ──────────────────────────────────
 
   extractCognigyData(requestContext: RequestContext): Record<string, unknown> | undefined {
     const task = requestContext.task;

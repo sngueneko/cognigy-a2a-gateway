@@ -10,8 +10,23 @@
  *   Body: { userId, sessionId, text, data? }
  *   Response: { text, data, outputStack[] }
  *
- * Cognigy appends internal metadata entries to outputStack that must be
- * filtered before returning to callers — see isCognigyInternalEntry().
+ * ## outputStack unwrapping
+ *
+ * Cognigy REST outputStack entries use the same `_cognigy._default.<type>`
+ * envelope as Socket output events. Each raw entry is expanded into one or
+ * more normalised CognigyBaseOutput objects so that OutputNormalizer type
+ * guards (`_quickReplies`, `_gallery`, etc.) work correctly:
+ *
+ *   Raw entry:
+ *     { text: "", data: { _cognigy: { _default: { _quickReplies: { ... } } } } }
+ *
+ *   Expanded:
+ *     { text: null, data: { _quickReplies: { ... } } }
+ *
+ * Plain-text entries are passed through unchanged. Internal metadata entries
+ * (only `_cognigy` key with `_messageId` / `_finishReason`) are dropped.
+ *
+ * This mirrors the unwrapping performed by SocketAdapter.buildOutputsFromMessage.
  */
 
 import axios, { AxiosInstance, AxiosError } from 'axios';
@@ -101,11 +116,19 @@ export class RestAdapter implements IAdapter {
       // Cognigy REST response uses outputStack[], not outputs[]
       const rawStack: ReadonlyArray<CognigyBaseOutput> = response.data?.outputStack ?? [];
 
-      // Filter out Cognigy internal metadata entries (empty text + only _cognigy data).
-      // Two known variants appended by Cognigy:
-      //   { text: "", data: { _cognigy: { _messageId: "..." } } }
-      //   { text: "", data: { _cognigy: { _messageId: "...", _finishReason: "stop" } } }
-      const outputs = rawStack.filter(entry => !isCognigyInternalEntry(entry));
+      // RAW diagnostic � only when LOG_LEVEL=debug
+      if (this.log.isLevelEnabled('debug')) {
+        this.log.debug({ RAW_STACK: JSON.stringify(rawStack), event: 'rest.raw' }, 'RestAdapter RAW outputStack');
+      }
+
+      // Filter internal metadata entries first, then unwrap _cognigy._default
+      // envelope so OutputNormalizer type guards work identically to the Socket path.
+      const outputs: CognigyBaseOutput[] = [];
+      for (const entry of rawStack) {
+        if (isCognigyInternalEntry(entry)) continue;
+        const expanded = this.expandOutputEntry(entry);
+        outputs.push(...expanded);
+      }
 
       this.log.info(
         {
@@ -162,5 +185,89 @@ export class RestAdapter implements IAdapter {
         err,
       );
     }
+  }
+
+  // ─── Private ──────────────────────────────────────────────────────────────
+
+  /**
+   * Expands a single Cognigy REST outputStack entry into one or more
+   * normalised CognigyBaseOutput objects.
+   *
+   * Cognigy REST uses the same `_cognigy._default.<type>` envelope as
+   * Socket output events. This method performs the same unwrapping as
+   * SocketAdapter.buildOutputsFromMessage so that OutputNormalizer receives
+   * data in the shape its type guards expect.
+   *
+   * Cases handled:
+   *   1. Plain text (text !== "" and text !== null) → passed through as-is
+   *   2. _cognigy._default.<type> present → unwrap each known key into its
+   *      own output entry (text: null, data: { _<type>: payload })
+   *   3. Media fields at root (_image, _audio, _video) → emitted directly
+   *   4. Unknown custom data → passed through as-is
+   *
+   * A single outputStack entry may produce multiple outputs (e.g. a message
+   * that contains both plain text and quick replies in the same data object).
+   */
+  private expandOutputEntry(entry: CognigyBaseOutput): CognigyBaseOutput[] {
+    const result: CognigyBaseOutput[] = [];
+
+    // ── Plain text ─────────────────────────────────────────────────────────
+    if (typeof entry.text === 'string' && entry.text.trim() !== '') {
+      result.push({ text: entry.text });
+    }
+
+    const rawData = entry.data as Record<string, unknown> | undefined;
+    if (!rawData) {
+      // No data at all — if there was text it's already pushed
+      return result.length > 0 ? result : [{ text: entry.text }];
+    }
+
+    const cognigyMeta = rawData['_cognigy'] as Record<string, unknown> | undefined;
+    const defaultData = cognigyMeta?.['_default'] as Record<string, unknown> | undefined;
+
+    if (defaultData) {
+      // ── Structured UI types from _cognigy._default ──────────────────────
+      if ('_quickReplies' in defaultData) {
+        result.push({ text: null, data: { _quickReplies: defaultData['_quickReplies'] } });
+      }
+      if ('_gallery' in defaultData) {
+        result.push({ text: null, data: { _gallery: defaultData['_gallery'] } });
+      }
+      if ('_buttons' in defaultData) {
+        result.push({ text: null, data: { _buttons: defaultData['_buttons'] } });
+      }
+      if ('_list' in defaultData) {
+        result.push({ text: null, data: { _list: defaultData['_list'] } });
+      }
+      if ('_adaptiveCard' in defaultData) {
+        result.push({ text: null, data: { _adaptiveCard: defaultData['_adaptiveCard'] } });
+      }
+      // If _cognigy._default was present we've handled this entry
+      return result;
+    }
+
+    // ── Media fields at root data level (no _cognigy wrapper) ─────────────
+    let hasMedia = false;
+    if ('_image' in rawData) {
+      result.push({ text: null, data: { _image: rawData['_image'] } });
+      hasMedia = true;
+    }
+    if ('_audio' in rawData) {
+      result.push({ text: null, data: { _audio: rawData['_audio'] } });
+      hasMedia = true;
+    }
+    if ('_video' in rawData) {
+      result.push({ text: null, data: { _video: rawData['_video'] } });
+      hasMedia = true;
+    }
+    if (hasMedia) return result;
+
+    // ── Unknown / custom data (no _cognigy, no media, no text) ────────────
+    // Pass through as-is so OutputNormalizer's custom-data path handles it.
+    if (result.length === 0) {
+      result.push({ text: entry.text, data: rawData });
+    }
+
+    return result;
   }
 }

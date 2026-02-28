@@ -21,6 +21,11 @@ Built with **TypeScript 5**, **Express 5**, **@a2a-js/sdk 0.3.10**, and **@cogni
   - [SocketAdapter](#socketadapter)
   - [SocketConnectionPool](#socketconnectionpool)
 - [Output Normalization](#-output-normalization)
+  - [Event Routing: StatusMessage vs Artifact](#event-routing-statusmessage-vs-artifact)
+  - [Human Text Generation](#human-text-generation)
+  - [DataPart Preservation](#datapart-preservation)
+  - [MIME Type Inference](#mime-type-inference)
+  - [Adaptive Card Extraction](#adaptive-card-extraction)
 - [Request Lifecycle](#-request-lifecycle)
 - [Getting Started](#-getting-started)
 - [Build](#-build)
@@ -56,9 +61,11 @@ The gateway sits between **any A2A client** and **Cognigy.AI**, translating the 
 
 - **Dual transport** — REST (synchronous) and Socket.IO (async/agentic, streaming, multi-turn) endpoints
 - **Multi-agent** — configure N independent agents, each with its own endpoint and skills
-- **Full A2A compliance** — AgentCard discovery, JSON-RPC 2.0 message protocol, `TaskArtifactUpdateEvent` streaming, task lifecycle events, spec v0.3.0
+- **Full A2A compliance** — AgentCard discovery, JSON-RPC 2.0 message protocol, task lifecycle events, spec v0.3.0
 - **Task-aware execution** — tracks in-flight tasks with `TaskSessionRegistry`; correct event sequences per adapter type; supports task cancellation
-- **Output normalization** — all Cognigy rich output types (quick replies, gallery, buttons, lists, Adaptive Cards) are automatically converted to A2A `Part` objects, always with a human-readable `TextPart`
+- **Output normalization** — all Cognigy rich output types (quick replies, gallery, buttons, lists, Adaptive Cards, image, audio, video) are automatically converted to A2A events with correct routing per type
+- **Dual A2A event routing** — conversational outputs → `TaskStatusUpdateEvent` with human-readable `TextPart` + structured `DataPart`; media outputs → `TaskArtifactUpdateEvent` with `FilePart` + MIME type
+- **MIME type inference** — image/audio/video MIME types automatically inferred from URL extension
 - **Internal metadata filtering** — Cognigy's `_cognigy` metadata entries are stripped transparently
 - **Socket connection pool** — persistent Socket.IO connections with exponential-backoff reconnect, idle-close, and per-session isolation
 - **Structured logging** — pino JSON logs with AWS CloudWatch-compatible format
@@ -79,7 +86,7 @@ src/
 ├── config/
 │   └── loader.ts               # Reads agents.config.json, resolves ${ENV} vars
 ├── handlers/
-│   └── CognigyAgentExecutor.ts # A2A AgentExecutor — task-aware, streaming, orchestrates send + normalize
+│   └── CognigyAgentExecutor.ts # A2A AgentExecutor — task-aware, routes NormalizedOutput to correct event type
 ├── task/
 │   ├── TaskSessionRegistry.ts  # In-flight task tracker (AbortController per taskId)
 │   └── TaskStoreFactory.ts     # Task store factory (memory default, Redis optional)
@@ -90,10 +97,10 @@ src/
 ├── pool/
 │   └── SocketConnectionPool.ts # Persistent connection lifecycle manager
 ├── normalizer/
-│   └── OutputNormalizer.ts     # Cognigy outputStack[] → A2A Part[]
+│   └── OutputNormalizer.ts     # Cognigy outputStack[] → NormalizedOutput (StatusMessage | Artifact)
 ├── types/
 │   ├── agent.types.ts          # Config schema types + A2A AgentCard types
-│   └── cognigy.types.ts        # Cognigy output types + internal-entry guards
+│   └── cognigy.types.ts        # Cognigy output types + type guards (incl. image/audio/video)
 └── logger.ts                   # pino structured logger
 ```
 
@@ -117,13 +124,13 @@ POST /agents/{id}/
                 └─► CognigyBaseOutput[]
         │
         ▼
-  normalizeOutputs(outputs)            ← OutputNormalizer (all outputs at once)
+  normalizeOutputs(outputs)            ← flattens all NormalizedOutput.parts into Part[]
         ▼
   Message { parts: Part[] }            ──► eventBus.publish()
   eventBus.finished()
 ```
 
-#### SOCKET adapter — true streaming
+#### SOCKET adapter — true streaming with event routing
 
 ```
 POST /agents/{id}/
@@ -139,11 +146,13 @@ POST /agents/{id}/
         └─ SocketAdapter.send({ onOutput })
                 │  connect → sendMessage
                 │
-                │  Cognigy 'output' event 1 → onOutput(output, 0) → normalizeOutput
-                │    └─► ArtifactUpdateEvent { id-0 } ──► eventBus  ← client sees immediately
+                │  Cognigy 'output' event → onOutput(output, i) → normalizeOutput(output)
                 │
-                │  Cognigy 'output' event N → onOutput(output, N-1) → normalizeOutput
-                │    └─► ArtifactUpdateEvent { id-N } ──► eventBus  ← client sees immediately
+                │    if NormalizedOutput.kind === 'status-message':
+                │      └─► TaskStatusUpdateEvent { state:'working', message:{parts} } ──► eventBus
+                │
+                │    if NormalizedOutput.kind === 'artifact':
+                │      └─► TaskArtifactUpdateEvent { artifact:{FilePart, TextPart} } ──► eventBus
                 │
                 └─ Cognigy 'finalPing' → Promise resolves
         │
@@ -156,11 +165,10 @@ POST /agents/{id}/
 
 | # | Event | `final` | Description |
 |---|---|---|---|
-| 1 | `TaskStatusUpdateEvent` `working` | `false` | Task started |
-| 2…N | `TaskArtifactUpdateEvent` | — | One per Cognigy output, streamed as they arrive |
-| N+1 | `TaskStatusUpdateEvent` `completed` | `true` | Task finished — stream closed |
-
-No `Message` is published for SOCKET agents. The `completed` status with `final:true` closes the task.
+| 1 | `TaskStatusUpdateEvent` `working` (no message) | `false` | Task opened |
+| 2…N | `TaskStatusUpdateEvent` `working` + `message` | `false` | Per conversational output (text, quick replies, etc.) |
+| 2…N | `TaskArtifactUpdateEvent` | — | Per media output (image, audio, video) |
+| N+1 | `TaskStatusUpdateEvent` `completed` | `true` | Task closed — stream ends |
 
 **Terminal status states:**
 
@@ -302,7 +310,7 @@ cp .env.example .env
 | `COGNIGY_BOOKING_URL` | ✅* | — | Referenced by `agents.config.json` via `${COGNIGY_BOOKING_URL}`. |
 | `COGNIGY_BOOKING_TOKEN` | ✅* | — | Referenced by `agents.config.json` via `${COGNIGY_BOOKING_TOKEN}`. |
 
-> ✅* = required if your `agents.config.json` references that variable. Any `${VAR}` placeholder that resolves to an empty or missing env var causes a `ConfigurationError` at startup — the gateway refuses to start rather than run with a broken URL.
+> ✅* = required if your `agents.config.json` references that variable. Any `${VAR}` placeholder that resolves to an empty or missing env var causes a `ConfigurationError` at startup.
 
 ---
 
@@ -314,9 +322,9 @@ Once running, the gateway exposes the following endpoints:
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/.well-known/agents.json` | Returns an array of all registered AgentCards. Used by orchestrators to discover all available agents. |
-| `GET` | `/agents` | Alias for `/.well-known/agents.json`. REST-convention discovery endpoint. |
-| `GET` | `/agents/:id/.well-known/agent-card.json` | Returns the single AgentCard for a specific agent. This is the A2A spec §3.1 canonical discovery URL. |
+| `GET` | `/.well-known/agents.json` | Returns an array of all registered AgentCards. |
+| `GET` | `/agents` | Alias for `/.well-known/agents.json`. |
+| `GET` | `/agents/:id/.well-known/agent-card.json` | Returns the AgentCard for a specific agent (A2A spec §3.1). |
 
 ### Invocation
 
@@ -328,7 +336,7 @@ Once running, the gateway exposes the following endpoints:
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/health` | Health check. Returns `{ "status": "healthy", "agents": N, "timestamp": "..." }`. Use for load-balancer probes. |
+| `GET` | `/health` | Health check. Returns `{ "status": "healthy", "agents": N, "timestamp": "..." }`. |
 
 ### Example A2A Request / Response
 
@@ -382,49 +390,34 @@ This is a fundamental design distinction in the gateway. The two adapter types p
 
 ### REST → delivers a `Message` directly
 
-REST is synchronous and instant. You send a request, Cognigy processes it, and you get all outputs back in one HTTP response. There is nothing to stream and nothing to cancel. The A2A protocol `Message` is sufficient — no task lifecycle needed.
+REST is synchronous. You send a request, Cognigy processes it, all outputs come back at once. The A2A `Message` is sufficient — no task lifecycle needed.
+
+The client receives exactly **1 event**: the final `Message` containing all parts flattened together (including any FilePart for media outputs, since streaming is not available on REST).
+
+### SOCKET → wraps everything in a `Task` with event routing
+
+SOCKET is asynchronous and streaming. The executor routes each `NormalizedOutput` to the correct A2A event type as it arrives:
 
 ```
-Client sends request
-    │
-    ▼
-Gateway calls Cognigy REST  ──── waits ────►  all outputs returned at once
-    │
-    ▼
-Message { parts: [output1, output2, ...] }   ← single complete response
+TaskStatusUpdateEvent { state:'working', final:false }     ← task opened
+
+  — conversational outputs get status-update events with message parts —
+TaskStatusUpdateEvent { state:'working', message:{parts}, final:false }   ← text / quick replies / buttons / etc.
+
+  — media outputs get artifact-update events —
+TaskArtifactUpdateEvent { artifact:{ FilePart, TextPart } }               ← image / audio / video
+
+TaskStatusUpdateEvent { state:'completed', final:true }    ← task closed
 ```
-
-The client receives exactly **1 event**: the final `Message`.
-
-### SOCKET → wraps everything in a `Task`
-
-SOCKET is asynchronous. Cognigy may stream back multiple outputs over several seconds. The flow could be cancelled mid-execution. This is exactly what the A2A **Task** concept was designed for — long-running, cancellable, streaming work.
-
-```
-Client sends request
-    │
-    ▼
-Gateway opens Socket session
-    │
-    ▼
-TaskStatusUpdateEvent { state: 'working',   final: false }  ← task has started
-TaskArtifactUpdateEvent { output 1 }                       ← arrives immediately
-TaskArtifactUpdateEvent { output 2 }                       ← arrives immediately
-TaskArtifactUpdateEvent { output N }                       ← arrives immediately
-TaskStatusUpdateEvent { state: 'completed', final: true }  ← task is done, stream closed
-```
-
-The client receives **N+2 events**: a `working` status, one artifact per Cognigy output (streamed progressively), then a `completed` status that closes the task. No `Message` is published.
-
-If the task is cancelled the terminal status is `canceled`. If an error occurs it is `failed`.
 
 ### Quick comparison
 
 | | REST | SOCKET |
 |---|---|---|
 | **Use for** | FAQ, lookup, simple Q&A | Booking, workflows, agentic flows |
-| **Response model** | `Message` only | `Task` with artifact streaming |
-| **A2A events sent** | `Message` | `working` → `ArtifactUpdate` × N → `completed` |
+| **Response model** | `Message` only | `Task` with status + artifact streaming |
+| **Conversational outputs** | `Message.parts[]` | `TaskStatusUpdateEvent` + `message.parts[]` |
+| **Media outputs** | `Message.parts[]` (inline FilePart) | `TaskArtifactUpdateEvent` with FilePart |
 | **Streaming** | ❌ No | ✅ Yes, per Cognigy output |
 | **Cancellable** | ❌ No | ✅ Yes, via `TaskSessionRegistry` |
 | **Max wait time** | 8 seconds | 60 seconds |
@@ -447,10 +440,10 @@ interface IAdapter {
 }
 
 interface AdapterSendParams {
-  readonly text: string;                    // User message
-  readonly sessionId: string;               // Conversation session ID (=A2A contextId)
-  readonly userId: string;                  // Stable user identifier
-  readonly data?: Record<string, unknown>;  // Optional custom data payload
+  readonly text: string;
+  readonly sessionId: string;
+  readonly userId: string;
+  readonly data?: Record<string, unknown>;
   readonly onOutput?: OutputCallback;       // Streaming callback (SocketAdapter only)
 }
 ```
@@ -478,6 +471,8 @@ Both adapters throw `AdapterError` on failure, carrying `adapterType` and the or
 
 **Use when:** Your Cognigy flow is an **agentic / multi-step** flow that requires streaming outputs or longer processing times. Best for booking assistants, complex workflows.
 
+The SocketAdapter unwraps Cognigy's `data._cognigy._default.<type>` envelope so OutputNormalizer receives the payload at the top level. It also detects media data fields (`_image`, `_audio`, `_video`) in `message.data` and emits them as separate outputs.
+
 #### Session Lifecycle & Timeout
 
 ```
@@ -485,12 +480,6 @@ connect() ──► sendMessage() ──► [output events...] ──► finalPi
                                       │
                               60s timeout guard
 ```
-
-| Event | Behavior |
-|---|---|
-| `finalPing` | ✅ Resolves with all collected outputs, disconnects client |
-| `disconnect` (before finalPing) | ❌ `AdapterError`: "disconnected unexpectedly" |
-| 60s timeout | ❌ `AdapterError`: "session timed out after 60000ms" |
 
 ---
 
@@ -515,22 +504,121 @@ After 6 failed attempts → **DEAD**. Auth errors (401/403) → **immediate DEAD
 
 ## 🔄 Output Normalization
 
-`OutputNormalizer` converts every Cognigy output to A2A `Part[]`. The golden rule:
+`OutputNormalizer` converts every Cognigy output into a typed `NormalizedOutput` discriminated union, and `CognigyAgentExecutor` routes it to the correct A2A event type.
 
-> **Every output always produces at least one `TextPart`**, even for rich structured content. This ensures text-only A2A clients always get a readable response, while rich clients can additionally use the `DataPart`.
+### Event Routing: StatusMessage vs Artifact
 
-### Normalization Rules
+The normalizer returns one of two shapes:
 
-| Cognigy Output Type | TextPart content | DataPart type |
-|---|---|---|
-| Plain text | `output.text` | *(none)* |
-| `_quickReplies` | `output.text` + rendered list of titles | `quick_replies` |
-| `_gallery` | List of `- title: subtitle` | `carousel` |
-| `_buttons` | `output.text` + rendered list of titles | `buttons` |
-| `_list` | Header + rendered list of `- title: subtitle` | `list` |
-| `_adaptiveCard` | Extracted `TextBlock.text` values from `body[]` | `AdaptiveCard` |
-| Custom data with `_fallbackText` | `_fallbackText` value | `cognigy/data` |
-| Custom data without `_fallbackText` | *(no TextPart)* | `cognigy/data` |
+```typescript
+// Conversational output → rides in TaskStatusUpdateEvent.status.message
+interface StatusMessageOutput {
+  kind: 'status-message';
+  parts: Part[];           // [TextPart, DataPart?]
+}
+
+// Binary media output → rides in TaskArtifactUpdateEvent.artifact
+interface ArtifactOutput {
+  kind: 'artifact';
+  parts: Part[];           // [FilePart, TextPart]
+  mimeType: string;        // inferred from URL extension
+  name: string;            // filename extracted from URL
+  fileUrl: string;
+}
+```
+
+The executor checks `normalized.kind` and publishes accordingly:
+
+```
+kind === 'status-message'
+  → TaskStatusUpdateEvent { state:'working', message:{ parts } }
+
+kind === 'artifact'
+  → TaskArtifactUpdateEvent { artifact:{ name, parts:[FilePart, TextPart] } }
+```
+
+### Human Text Generation
+
+Every output type always produces at least one `TextPart` — ensuring text-only A2A clients (including pure LLM agents) always get a readable response, regardless of the Cognigy output type.
+
+| Cognigy Output Type | TextPart content |
+|---|---|
+| Plain text | `output.text` verbatim |
+| `_quickReplies` | Label + `- <title> ![image](<imageUrl>)` per option (imageUrl if non-empty) |
+| `_buttons` | Label + `- <title>` / `- <title>: <url>` for `web_url` type buttons |
+| `_list` | Header + `- <title>: <subtitle> ![image](<imageUrl>)` per item (imageUrl if non-empty) |
+| `_gallery` | `output.text` (or "Here are some options:") + `- <title>: <subtitle> ![image](<imageUrl>)` per card |
+| `_adaptiveCard` | All TextBlocks + FactSet rows + Input labels + Action titles (see below) |
+| Custom data with `_fallbackText` | `_fallbackText` value |
+| Custom data without `_fallbackText` | *(empty TextPart)* |
+| Image | `[Image: <url>]` |
+| Audio | `[Audio: <url>]` |
+| Video | `[Video: <url>]` |
+
+#### Gallery intro sentence
+
+Gallery outputs use `output.text` as the intro sentence when present. When `output.text` is null (Cognigy sends `text: null` alongside the gallery payload), the intro defaults to `"Here are some options:"`. This ensures LLM agents always receive a complete, grammatically correct description.
+
+### DataPart Preservation
+
+For all structured types, the original Cognigy payload is preserved verbatim in a `DataPart`. Downstream agents that understand Cognigy formats can read the full payload; agents that don't simply ignore it.
+
+```json
+{
+  "kind": "data",
+  "data": {
+    "type": "quick_replies",
+    "payload": {
+      "text": "Choose your topic",
+      "quickReplies": [
+        { "title": "Billing", "payload": "billing" },
+        { "title": "Technical Support", "payload": "tech" }
+      ]
+    }
+  }
+}
+```
+
+| Cognigy Type | DataPart `type` field |
+|---|---|
+| `_quickReplies` | `quick_replies` |
+| `_gallery` | `carousel` |
+| `_buttons` | `buttons` |
+| `_list` | `list` |
+| `_adaptiveCard` | `AdaptiveCard` |
+| Custom data | `cognigy/data` |
+| Image / Audio / Video | *(no DataPart — `FilePart` instead)* |
+
+Cognigy-internal keys (`_fallbackText`, `_cognigy`) are stripped before the DataPart is created.
+
+### MIME Type Inference
+
+Image, audio, and video outputs include a `FilePart` with the media URL and an inferred MIME type based on the URL file extension:
+
+| Category | Supported extensions |
+|---|---|
+| Image | `jpg`, `jpeg`, `png`, `gif`, `webp`, `svg`, `bmp`, `ico` |
+| Audio | `mp3`, `ogg`, `wav`, `m4a`, `aac`, `flac`, `webm` |
+| Video | `mp4`, `webm`, `ogg`, `avi`, `mov`, `mkv`, `m4v` |
+
+Unknown extensions fall back to `image/jpeg`, `audio/mpeg`, or `video/mp4` respectively. Query strings are stripped before extension detection.
+
+### Adaptive Card Extraction
+
+The Adaptive Card renderer performs a **recursive deep extraction** across all known card element types, producing a single readable text block that an LLM agent can interpret without knowledge of the Adaptive Card schema:
+
+| Element type | Extracted content |
+|---|---|
+| `TextBlock` | `.text` value |
+| `FactSet` | `"<title>: <value>"` per fact |
+| `Input.Text`, `Input.Date`, `Input.Number`, `Input.Time` | Label + placeholder |
+| `Input.ChoiceSet` | Label + `"- <title>"` per choice |
+| `Input.Toggle` | `.title` text |
+| `ColumnSet` | Recurses into `columns[].items` |
+| `Container` | Recurses into `items` |
+| `Action.*` | `"[Action: <title>]"` |
+
+This means an LLM agent reading the TextPart from an Adaptive Card can see both the card's displayed content (TextBlocks) and understand what inputs/choices it is presenting to the user (Input fields, choices, actions).
 
 ---
 
@@ -611,14 +699,6 @@ node dist/index.js
 
 See the [Docker Deployment](#-docker-deployment) section below.
 
-### Environment tips
-
-| Environment | `LOG_PRETTY` | `LOG_LEVEL` |
-|---|---|---|
-| Local dev | `true` | `debug` |
-| CI/CD | `false` | `info` |
-| Production | `false` | `info` / `warn` |
-
 ---
 
 ## 🐳 Docker Deployment
@@ -630,200 +710,59 @@ The gateway ships with a production-grade multi-stage `Dockerfile` and a `docker
 | Gateway only (memory store) | `docker compose up` | Single instance, dev/staging |
 | Gateway + Redis | `docker compose --profile redis up` | Multi-replica, persistent task state |
 
-### Prerequisites
-
-- [Docker](https://docs.docker.com/get-docker/) 24+
-- Docker Compose v2 (`docker compose`, not `docker-compose`)
-
----
-
 ### Step 1 — Create your env file
 
 ```bash
 cp .env.example .env.docker
 ```
 
-Edit `.env.docker` with your real values — this file is never committed:
+Edit `.env.docker` with your real values:
 
 ```env
-# ─── Server ───────────────────────────────────────────────────────────────────
 PORT=3000
 LOG_LEVEL=info
 LOG_PRETTY=false
-
-# ─── Task store ───────────────────────────────────────────────────────────────
 TASK_STORE_TYPE=memory
-# TASK_STORE_REDIS_URL=redis://redis:6379   # uncomment when using --profile redis
-
-# ─── Cognigy credentials ──────────────────────────────────────────────────────
-# Add one pair per agent defined in agents.config.json
 COGNIGY_BOOKING_URL=https://endpoint-trial.cognigy.ai/socket/YOUR_WORKSPACE/YOUR_ENDPOINT
 COGNIGY_BOOKING_TOKEN=your-booking-token-here
 COGNIGY_FAQ_URL=https://endpoint-trial.cognigy.ai/YOUR_WORKSPACE/YOUR_ENDPOINT
 COGNIGY_FAQ_TOKEN=your-faq-token-here
 ```
 
----
-
-### Step 2 — Verify your agents.config.json
-
-Make sure every `endpointUrl` and `urlToken` uses `${VAR}` placeholders that match the variables in `.env.docker`:
-
-```json
-{
-  "agents": [
-    {
-      "id": "booking-agent",
-      "endpointType": "SOCKET",
-      "endpointUrl": "${COGNIGY_BOOKING_URL}",
-      "urlToken": "${COGNIGY_BOOKING_TOKEN}",
-      "..."
-    }
-  ]
-}
-```
-
-The config file is mounted into the container as **read-only**. You never need to rebuild the image to change agent configuration — just edit the file and restart the container.
-
----
-
-### Step 3 — Build and start
-
-#### Option A — Gateway only (memory task store)
+### Step 2 — Build and start
 
 ```bash
+# Gateway only
 docker compose --env-file .env.docker up --build
-```
 
-Detached (background):
-
-```bash
-docker compose --env-file .env.docker up --build -d
-```
-
-#### Option B — Gateway + Redis (persistent task store)
-
-Set `TASK_STORE_TYPE=redis` and uncomment `TASK_STORE_REDIS_URL` in `.env.docker`, then:
-
-```bash
+# Gateway + Redis
 docker compose --env-file .env.docker --profile redis up --build -d
 ```
 
-Redis data is persisted in a named Docker volume (`redis-data`) — task state survives container restarts.
-
----
-
-### Step 4 — Verify
+### Step 3 — Verify
 
 ```bash
-# Health check
 curl http://localhost:3000/health
-# Expected: {"status":"healthy","agents":2,"timestamp":"..."}
-
-# Discover all agents
 curl http://localhost:3000/.well-known/agents.json
-
-# Send a test message
-curl -X POST http://localhost:3000/agents/faq-agent/ \
-  -H "Content-Type: application/json" \
-  -d '{
-    "jsonrpc": "2.0",
-    "method": "message/send",
-    "id": "test-1",
-    "params": {
-      "message": {
-        "kind": "message",
-        "messageId": "msg-1",
-        "role": "user",
-        "contextId": "test-session-001",
-        "parts": [{"kind": "text", "text": "Hello!"}]
-      }
-    }
-  }'
 ```
-
----
 
 ### Common commands
 
 ```bash
-# View live logs
 docker compose --env-file .env.docker logs -f gateway
-
-# Restart gateway only (e.g. after agents.config.json change)
 docker compose --env-file .env.docker restart gateway
-
-# Rebuild image after source code change
 docker compose --env-file .env.docker up --build -d
-
-# Stop all containers
 docker compose --env-file .env.docker down
-
-# Stop and remove Redis volume (wipes all task state)
-docker compose --env-file .env.docker --profile redis down -v
-
-# Check running containers and health
-docker compose --env-file .env.docker ps
 ```
-
----
-
-### Build and push standalone image
-
-For CI/CD pipelines that build and push separately:
-
-```bash
-# Build
-docker build -t cognigy-a2a-gateway:latest .
-
-# Tag for a registry
-docker tag cognigy-a2a-gateway:latest registry.example.com/cognigy-a2a-gateway:1.0.0
-
-# Push
-docker push registry.example.com/cognigy-a2a-gateway:1.0.0
-
-# Run from pushed image (no build needed)
-docker run -d \
-  -p 3000:3000 \
-  --env-file .env.docker \
-  -v $(pwd)/agents.config.json:/app/agents.config.json:ro \
-  --name cognigy-a2a-gateway \
-  registry.example.com/cognigy-a2a-gateway:1.0.0
-```
-
----
-
-### Startup error: missing environment variable
-
-If a `${VAR}` placeholder in `agents.config.json` has no matching env var, the gateway **refuses to start** and logs:
-
-```
-ConfigurationError: Missing required environment variable "COGNIGY_BOOKING_TOKEN"
-  referenced in config field "agents[0].urlToken"
-```
-
-Check that every `${VAR}` in your config has a corresponding line in `.env.docker`.
 
 ---
 
 ## 🧪 Testing
 
-### Run all tests
-
 ```bash
-npm test
-```
-
-### Run with coverage report
-
-```bash
-npm run test:coverage
-```
-
-### Watch mode
-
-```bash
-npm run test:watch
+npm test                  # run all tests
+npm run test:coverage     # with coverage report
+npm run test:watch        # watch mode
 ```
 
 ### Test structure
@@ -832,47 +771,25 @@ npm run test:watch
 |---|---|
 | `tests/adapters/RestAdapter.test.ts` | URL construction, internal entry filtering, timeout, HTTP errors, request body |
 | `tests/adapters/SocketAdapter.test.ts` | Per-session isolation, output streaming, finalPing, timeout, disconnect |
-| `tests/normalizer/OutputNormalizer.test.ts` | All output types → Part conversion, text rendering, DataPart structure |
+| `tests/normalizer/OutputNormalizer.test.ts` | All output types → NormalizedOutput, TextPart content, DataPart structure, MIME inference, Adaptive Card extraction |
 | `tests/pool/SocketConnectionPool.test.ts` | State machine transitions, reconnect backoff, idle timeout, auth errors |
 | `tests/registry/AgentRegistry.test.ts` | AgentCard generation, multi-agent lookup, URL construction |
 | `tests/config/loader.test.ts` | ENV substitution, missing variable errors, JSON parse errors, duplicate IDs |
 | `tests/task/TaskSessionRegistry.test.ts` | Register/deregister tasks, abort in-flight tasks, concurrent tracking |
 | `tests/task/TaskStoreFactory.test.ts` | Memory store (default), Redis store selection via `TASK_STORE_TYPE` |
-| `tests/handlers/CognigyAgentExecutor.test.ts` | REST vs SOCKET event sequences, cancel, error, terminal status events |
+| `tests/handlers/CognigyAgentExecutor.test.ts` | REST vs SOCKET event sequences, status-message vs artifact routing, cancel, error, terminal states |
 
 ---
 
 ## ☁️ Azure AI Foundry Integration
 
-Azure AI Foundry supports A2A natively — it can call external agents using the same A2A protocol your gateway speaks.
-
-### Architecture
+In **Azure AI Foundry** → your project → **Agents** → **Connected agents** → paste the AgentCard URL:
 
 ```
-User
- │
- ▼
-Azure AI Foundry Agent  (GPT-4o, your system prompt)
- │  A2A JSON-RPC
- ▼
-Azure API Management  (exposes internal gateway to Azure)
- │  HTTP forward (VNet)
- ▼
-Cognigy A2A Gateway
- │
- ▼
-Cognigy.AI
+https://your-apim.azure-api.net/agents/faq-agent/.well-known/agent-card.json
 ```
 
-### Setup steps
-
-1. Deploy the gateway (Docker or Node.js)
-2. Expose it via **Azure API Management** (VNet integration) — or use `ngrok` for quick testing
-3. In **Azure AI Foundry** → your project → **Agents** → **Connected agents** → paste the AgentCard URL:
-   ```
-   https://your-apim.azure-api.net/agents/faq-agent/.well-known/agent-card.json
-   ```
-4. Foundry fetches the card, reads the skills, and registers Cognigy as a callable sub-agent
+Foundry fetches the card, reads the skills, and registers Cognigy as a callable sub-agent.
 
 ---
 
@@ -907,21 +824,18 @@ All logs are **structured JSON** using [pino](https://getpino.io/):
   "time": "2025-01-01T12:00:00.000Z",
   "service": "cognigy-a2a-gateway",
   "env": "production",
-  "component": "RestAdapter",
-  "agentId": "faq-agent",
-  "sessionId": "session-abc-123",
-  "durationMs": 342,
-  "event": "rest.request.success",
-  "msg": "REST request completed"
+  "component": "CognigyAgentExecutor",
+  "agentId": "booking-agent",
+  "taskId": "task-uuid",
+  "statusMessageCount": 3,
+  "artifactCount": 1,
+  "durationMs": 4200,
+  "event": "session.ended",
+  "msg": "A2A request completed"
 }
 ```
 
-Set `LOG_PRETTY=true` and `LOG_LEVEL=debug` for development:
-
-```
-12:00:00 INFO  [Server] Cognigy A2A Gateway listening on port 3000
-12:00:01 INFO  [RestAdapter] REST request completed { durationMs: 342, outputCount: 1 }
-```
+Set `LOG_PRETTY=true` and `LOG_LEVEL=debug` for development.
 
 ---
 
@@ -934,6 +848,7 @@ Set `LOG_PRETTY=true` and `LOG_LEVEL=debug` for development:
 - [x] **Phase 3.2** — Task-aware execution: `TaskSessionRegistry`, `TaskStoreFactory`, task lifecycle status events
 - [x] **Phase 3.3** — True A2A streaming: `OutputCallback`, `TaskArtifactUpdateEvent` per output, correct terminal states
 - [x] **Phase 3.4** — Production Dockerfile (multi-stage, node:22-alpine), `docker-compose.yml` with Redis profile
+- [x] **Phase 3.5** — Output normalization refactor: `NormalizedOutput` discriminated union, `StatusMessageOutput` → `TaskStatusUpdateEvent`, `ArtifactOutput` → `TaskArtifactUpdateEvent`, MIME type inference, full Adaptive Card extraction, image/audio/video type guards
 - [ ] **Phase 5** — AWS CDK stacks (NetworkStack, DataStack, ComputeStack, ObservabilityStack)
 - [ ] **Phase 6** — GitLab CI/CD pipeline (build → test → docker → deploy)
 - [ ] **Phase 7** — Route 53 + WAF, auto scaling, go-live

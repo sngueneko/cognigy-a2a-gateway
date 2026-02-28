@@ -167,6 +167,8 @@ describe('SocketAdapter', () => {
         text: 'Choose one:',
         quickReplies: [{ id: 1, title: 'Yes', payload: 'yes', contentType: 'postback', imageAltText: undefined, imageUrl: undefined }],
       };
+      // Adapter receives Cognigy's raw envelope (_cognigy._default._quickReplies)
+      // and unwraps it to the top-level _quickReplies key for OutputNormalizer.
       currentMockClient.emit('output', {
         text: null,
         data: { _cognigy: { _default: { _quickReplies: quickReplies } } },
@@ -176,7 +178,8 @@ describe('SocketAdapter', () => {
       const result = await sendPromise;
       expect(result).toHaveLength(1);
       expect(result[0]!.text).toBeNull();
-      expect((result[0]!.data as any)?._cognigy?._default?._quickReplies).toEqual(quickReplies);
+      // After unwrapping: data = { _quickReplies: {...} } — no _cognigy envelope
+      expect((result[0]!.data as any)?._quickReplies).toEqual(quickReplies);
     });
 
     it('extracts _gallery from output', async () => {
@@ -187,6 +190,8 @@ describe('SocketAdapter', () => {
       await Promise.resolve();
 
       const gallery = { type: 'carousel' as const, items: [{ id: 1, title: 'Item', subtitle: 'Sub', imageUrl: 'http://img.png', buttons: null, imageAltText: undefined }] };
+      // Adapter receives Cognigy's raw envelope (_cognigy._default._gallery)
+      // and unwraps it to the top-level _gallery key for OutputNormalizer.
       currentMockClient.emit('output', {
         text: null,
         data: { _cognigy: { _default: { _gallery: gallery } } },
@@ -195,7 +200,8 @@ describe('SocketAdapter', () => {
 
       const result = await sendPromise;
       expect(result).toHaveLength(1);
-      expect((result[0]!.data as any)?._cognigy?._default?._gallery).toEqual(gallery);
+      // After unwrapping: data = { _gallery: {...} } — no _cognigy envelope
+      expect((result[0]!.data as any)?._gallery).toEqual(gallery);
     });
 
     it('extracts custom data (no _cognigy key)', async () => {

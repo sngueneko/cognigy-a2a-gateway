@@ -35,6 +35,49 @@ function makeOutput(text: string): CognigyBaseOutput {
 }
 
 /**
+ * Simulates what Cognigy REST actually returns for a structured output:
+ * the text is in the payload and data uses the _cognigy._default envelope.
+ */
+function makeWrappedQuickReplies(text: string): CognigyBaseOutput {
+  return {
+    text: '',
+    data: {
+      _cognigy: {
+        _default: {
+          _quickReplies: {
+            type: 'quick_replies',
+            text,
+            quickReplies: [
+              { title: 'Option A', payload: 'a' },
+              { title: 'Option B', payload: 'b' },
+            ],
+          },
+        },
+      },
+    },
+  } as unknown as CognigyBaseOutput;
+}
+
+function makeWrappedGallery(): CognigyBaseOutput {
+  return {
+    text: '',
+    data: {
+      _cognigy: {
+        _default: {
+          _gallery: {
+            type: 'carousel',
+            items: [
+              { title: 'Card 1', subtitle: 'Sub 1' },
+              { title: 'Card 2', subtitle: 'Sub 2' },
+            ],
+          },
+        },
+      },
+    },
+  } as unknown as CognigyBaseOutput;
+}
+
+/**
  * Cognigy internal entry: only _messageId (no _finishReason).
  * Seen mid-stack — causes a spurious "cognigy/data" DataPart if not filtered.
  */
@@ -84,12 +127,90 @@ describe('RestAdapter', () => {
     it('strips trailing slash from endpointUrl before appending urlToken', async () => {
       const instance = axios.create();
       const mock = new MockAdapter(instance);
-      // Adapter with trailing slash — should still resolve correctly
       const adapter = new RestAdapter(AGENT_ID, `${ENDPOINT_URL}/`, URL_TOKEN, instance);
 
       mock.onPost().reply(200, { outputStack: [] });
 
       await expect(adapter.send({ text: 'Hi', sessionId: 's', userId: 'u' })).resolves.toEqual([]);
+    });
+  });
+
+  // ── _cognigy._default unwrapping ───────────────────────────────────────────
+
+  describe('send() — _cognigy._default envelope unwrapping', () => {
+
+    it('unwraps _quickReplies from _cognigy._default into a flat { _quickReplies } output', async () => {
+      const { adapter, mock } = makeInjectedAdapter();
+      mock.onPost().reply(200, {
+        outputStack: [makeWrappedQuickReplies('Choose an option')],
+      });
+
+      const result = await adapter.send({ text: 'Hi', sessionId: 's', userId: 'u' });
+
+      expect(result).toHaveLength(1);
+      const output = result[0]!;
+      expect(output.text).toBeNull();
+      expect(output.data).toHaveProperty('_quickReplies');
+      const qr = (output.data as Record<string, unknown>)['_quickReplies'] as Record<string, unknown>;
+      expect(qr['text']).toBe('Choose an option');
+      expect(Array.isArray(qr['quickReplies'])).toBe(true);
+    });
+
+    it('unwraps _gallery from _cognigy._default', async () => {
+      const { adapter, mock } = makeInjectedAdapter();
+      mock.onPost().reply(200, {
+        outputStack: [makeWrappedGallery()],
+      });
+
+      const result = await adapter.send({ text: 'Hi', sessionId: 's', userId: 'u' });
+
+      expect(result).toHaveLength(1);
+      expect(result[0]!.data).toHaveProperty('_gallery');
+    });
+
+    it('passes plain text through unchanged', async () => {
+      const { adapter, mock } = makeInjectedAdapter();
+      mock.onPost().reply(200, {
+        outputStack: [makeOutput('Hello world')],
+      });
+
+      const result = await adapter.send({ text: 'Hi', sessionId: 's', userId: 'u' });
+
+      expect(result).toHaveLength(1);
+      expect(result[0]?.text).toBe('Hello world');
+    });
+
+    it('handles mixed stack: plain text + wrapped quickReplies + internal entries', async () => {
+      const { adapter, mock } = makeInjectedAdapter();
+      mock.onPost().reply(200, {
+        outputStack: [
+          makeOutput('Processing your request…'),
+          makeWrappedQuickReplies('Please choose:'),
+          INTERNAL_MESSAGE_ID_ONLY,
+          FINISH_MARKER_OBJECT,
+        ],
+      });
+
+      const result = await adapter.send({ text: 'Hi', sessionId: 's', userId: 'u' });
+
+      expect(result).toHaveLength(2);
+      expect(result[0]?.text).toBe('Processing your request…');
+      expect(result[1]?.data).toHaveProperty('_quickReplies');
+    });
+
+    it('does not emit duplicate text when structured data is present', async () => {
+      // When _cognigy._default is present, message.text is a duplicate of the payload text.
+      // The adapter must NOT emit a separate plain-text entry for it.
+      const { adapter, mock } = makeInjectedAdapter();
+      mock.onPost().reply(200, {
+        outputStack: [makeWrappedQuickReplies('Choose an option')],
+      });
+
+      const result = await adapter.send({ text: 'Hi', sessionId: 's', userId: 'u' });
+
+      // Exactly one output — the unwrapped _quickReplies, NOT a separate TextPart
+      expect(result).toHaveLength(1);
+      expect(result[0]?.data).toHaveProperty('_quickReplies');
     });
   });
 
@@ -155,7 +276,6 @@ describe('RestAdapter', () => {
       const result = await adapter.send({ text: 'Hi', sessionId: 's', userId: 'u' });
 
       expect(result).toHaveLength(1);
-      expect(result[0]?.text).toBe('');
     });
 
     it('does NOT filter entries that have real text even if _cognigy data is present', async () => {
@@ -233,8 +353,6 @@ describe('RestAdapter', () => {
     });
 
     it('throws AdapterError on timeout', async () => {
-      // Inject a mock instance that rejects with the exact AxiosError axios produces on timeout.
-      // axios-mock-adapter's .timeout() does not reliably set code:'ECONNABORTED'.
       const timeoutErr = new AxiosError('timeout of 8000ms exceeded', 'ECONNABORTED');
       const mockInstance = { post: jest.fn().mockRejectedValueOnce(timeoutErr) } as unknown as AxiosInstance;
 

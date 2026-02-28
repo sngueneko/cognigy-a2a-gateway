@@ -78,12 +78,16 @@ body{background:var(--bg);color:var(--txt);font-family:'IBM Plex Mono',monospace
 .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
 .grid4{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px}
 
-/* normalizer rules */
+/* normalizer rules — UPDATED for discriminated union */
+.norm-section{margin-bottom:10px}
+.norm-section-hdr{font-size:9px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;padding:5px 8px;border-radius:4px;margin-bottom:6px}
+.norm-section-status{background:#071a10;color:var(--green);border:1px solid #1a4a28}
+.norm-section-artifact{background:#1a0c00;color:var(--orange);border:1px solid #4a2800}
 .norm-rule{display:flex;gap:8px;font-size:9.5px;line-height:1.45;padding:5px 0;border-bottom:1px solid #0e1e28}
 .norm-rule:last-child{border-bottom:none}
 .nr-type{color:var(--orange);min-width:115px;font-weight:600;flex-shrink:0}
 .nr-arrow{color:var(--cyan);flex-shrink:0;margin-top:1px}
-.nr-out .always{color:var(--green);font-weight:600}.nr-out .opt{color:var(--muted)}
+.nr-out .always{color:var(--green);font-weight:600}.nr-out .opt{color:var(--muted)}.nr-out .media{color:var(--orange);font-weight:600}
 
 /* socket flow diagram */
 .sock-flow{display:flex;flex-direction:column;gap:0;margin-top:10px}
@@ -120,6 +124,7 @@ body{background:var(--bg);color:var(--txt);font-family:'IBM Plex Mono',monospace
 .leg-dot{width:10px;height:10px;border-radius:2px}
 
 .new-badge{display:inline-block;font-size:7.5px;font-weight:700;padding:1px 5px;border-radius:2px;background:#3d2a08;color:#fbbf24;letter-spacing:1px;text-transform:uppercase;margin-left:6px;vertical-align:middle}
+.upd-badge{display:inline-block;font-size:7.5px;font-weight:700;padding:1px 5px;border-radius:2px;background:#0a2a3d;color:var(--cyan);letter-spacing:1px;text-transform:uppercase;margin-left:6px;vertical-align:middle}
 
 /* ── LIGHT MODE ── */
 html.light {
@@ -166,6 +171,8 @@ html.light .T-reconnect{ background:#fdba74; color:#c2410c; }
 html.light .T-multiplex{ background:#99f6e4; color:#0f766e; }
 
 html.light .sec { color:#64748b; border-color:#e2e8f0; }
+html.light .norm-section-status { background:#f0fdf4; border-color:#86efac; color:#047857; }
+html.light .norm-section-artifact { background:#fff7ed; border-color:#fed7aa; color:#c2410c; }
 html.light .norm-rule { border-color:#e2e8f0; }
 html.light .nr-out .opt { color:#94a3b8; }
 html.light .sf-row { border-color:#e8f0e8; }
@@ -188,6 +195,7 @@ html.light .s-dead     { background:#fee2e2; color:#7f1d1d; border-color:#fca5a5
 html.light .legend { }
 html.light .leg { color:#475569; }
 html.light .new-badge { background:#fef3c7; color:#92400e; }
+html.light .upd-badge { background:#cffafe; color:#0e7490; }
 html.light .B-normalizer { animation:glow-light 3s ease-in-out infinite; }
 @keyframes glow-light { 0%,100%{box-shadow:0 0 0 rgba(14,116,144,0)}50%{box-shadow:0 0 16px rgba(14,116,144,.18)} }
 html.light .L-socket-mgmt { animation:fadeUp .5s .24s forwards, borderPulse-light 3s 1s ease-in-out infinite; }
@@ -206,7 +214,6 @@ html.light .L-socket-mgmt { animation:fadeUp .5s .24s forwards, borderPulse-ligh
 #theme-toggle:hover { transform:translateY(-1px); box-shadow:0 4px 20px rgba(0,0,0,.3); }
 #theme-toggle .ico { font-size:14px; line-height:1; }
 html.light #theme-toggle { background:#fff; box-shadow:0 2px 12px rgba(0,0,0,.1); }
-
 </style>
 </head>
 <body>
@@ -248,17 +255,17 @@ html.light #theme-toggle { background:#fff; box-shadow:0 2px 12px rgba(0,0,0,.1)
       <div class="box B-consumer">
         <div class="tag T-consumer">LLM Agent</div>
         <div class="box-tit">Orchestrator Agent</div>
-        <div class="box-sub">LLM-basiert · liest TextPart semantisch · DataPart optional für strukturierte Verarbeitung</div>
+        <div class="box-sub">LLM-basiert · liest TextPart semantisch · DataPart optional für strukturierte Verarbeitung · FilePart für Media</div>
       </div>
       <div class="box B-consumer">
         <div class="tag T-consumer">Human UI</div>
         <div class="box-tit">Copilot / Agent Assist</div>
-        <div class="box-sub">TextPart als Fallback · DataPart für natives Rendering: Buttons, AdaptiveCards, Gallery</div>
+        <div class="box-sub">TextPart als Fallback · DataPart für natives Rendering: Buttons, AdaptiveCards, Gallery · FilePart für Bilder/Audio/Video</div>
       </div>
       <div class="box B-consumer">
         <div class="tag T-consumer">A2A Agent</div>
         <div class="box-tit">Anderer AI Agent</div>
-        <div class="box-sub">TextPart = universelle Sprache · keine Cognigy-Typ-Kenntnis nötig · voll interoperabel</div>
+        <div class="box-sub">TextPart = universelle Sprache · keine Cognigy-Typ-Kenntnis nötig · voll interoperabel · Media via TaskArtifactUpdateEvent</div>
       </div>
     </div>
   </div>
@@ -288,7 +295,7 @@ html.light #theme-toggle { background:#fff; box-shadow:0 2px 12px rgba(0,0,0,.1)
       </div>
       <div class="box B-session" style="flex:none;min-width:190px">
         <div class="box-tit">Session Store</div>
-        <div class="box-sub">a2a.contextId = cognigy.sessionId<br>1:1 Mapping direkt<br>userId = "a2a-gateway" (fix)<br>Map (Prototype) · Redis (Prod)</div>
+        <div class="box-sub">a2a.contextId = cognigy.sessionId<br>1:1 Mapping direkt<br>userId = "a2a-user-{contextId}"<br>TaskSessionRegistry: AbortController pro Task</div>
       </div>
     </div>
 
@@ -302,7 +309,7 @@ html.light #theme-toggle { background:#fff; box-shadow:0 2px 12px rgba(0,0,0,.1)
       <div class="box B-handler">
         <div class="tag T-handler">implements</div>
         <div class="box-tit">CognigyAgentExecutor</div>
-        <div class="box-sub">AgentExecutor interface<br>execute(ctx, eventBus)<br>cancelTask(taskId)<br>→ wählt Adapter via Registry</div>
+        <div class="box-sub">AgentExecutor interface<br>execute(ctx, eventBus)<br>NormalizedOutput.kind → event routing<br>'status-message' → StatusUpdateEvent<br>'artifact' → ArtifactUpdateEvent</div>
       </div>
     </div>
 
@@ -311,36 +318,47 @@ html.light #theme-toggle { background:#fff; box-shadow:0 2px 12px rgba(0,0,0,.1)
       <div class="box B-adapter">
         <div class="tag T-adapter">axios</div>
         <div class="box-tit">REST Adapter</div>
-        <div class="box-sub">Standalone Flow · sync<br>POST endpoint-url · max 8s<br>response: outputStack[]<br>→ kein Connection Management nötig</div>
+        <div class="box-sub">Standalone Flow · sync<br>POST endpoint-url · max 8s<br>response: outputStack[]<br>→ normalizeOutputs() → Message</div>
       </div>
       <div class="box B-adapter" style="border-color:#7a5510">
         <div class="tag T-adapter">@cognigy/socket-client</div>
-        <div class="box-tit">Socket Adapter <span class="new-badge">CONNECTION MGT</span></div>
-        <div class="box-sub">Agentic Flow · LLM + Tools<br>→ nutzt Connection Pool (Layer 2b)<br>on("output") → stream live<br>on("finalPing") → Task done</div>
+        <div class="box-tit">Socket Adapter <span class="upd-badge">UPDATED</span></div>
+        <div class="box-sub">Agentic Flow · LLM + Tools<br>Unwraps _cognigy._default.<type><br>Detects _image / _audio / _video<br>on("output") → onOutput() → route per kind</div>
       </div>
     </div>
 
-    <div class="sec">④ Output Normalizer — Kernregel: Jeder Cognigy-Typ → TextPart (IMMER) + DataPart (optional)</div>
+    <div class="sec">④ Output Normalizer — Discriminated Union: NormalizedOutput = StatusMessageOutput | ArtifactOutput <span class="upd-badge">REFACTORED</span></div>
     <div class="row">
       <div class="box B-normalizer">
         <div class="tag T-norm">⚡ OutputNormalizer</div>
-        <div class="box-tit">normalize(cognigyOutput) → A2APart[]</div>
-        <div class="norm-rule"><span class="nr-type">text (plain)</span><span class="nr-arrow">→</span><span class="nr-out"><span class="always">TextPart</span>: text direkt · kein DataPart</span></div>
-        <div class="norm-rule"><span class="nr-type">_quickReplies</span><span class="nr-arrow">→</span><span class="nr-out"><span class="always">TextPart</span>: "Bitte wähle: Option A, Option B" · <span class="opt">DataPart</span>: {type:"quickReplies", options:[...]}</span></div>
-        <div class="norm-rule"><span class="nr-type">_gallery</span><span class="nr-arrow">→</span><span class="nr-out"><span class="always">TextPart</span>: "Karte 1: Titel – URL, ..." · <span class="opt">DataPart</span>: {type:"gallery", items:[...]}</span></div>
-        <div class="norm-rule"><span class="nr-type">_adaptiveCard</span><span class="nr-arrow">→</span><span class="nr-out"><span class="always">TextPart</span>: "Formular: Feld A=?, Feld B=?" · <span class="opt">DataPart</span>: {type:"adaptiveCard", schema:{...}}</span></div>
-        <div class="norm-rule"><span class="nr-type">_buttons / _list</span><span class="nr-arrow">→</span><span class="nr-out"><span class="always">TextPart</span>: "[1] Label A  [2] Label B" · <span class="opt">DataPart</span>: {type:"buttons"|"list", items:[...]}</span></div>
-        <div class="norm-rule"><span class="nr-type">_fallbackText</span><span class="nr-arrow">→</span><span class="nr-out"><span class="always">TextPart</span>: _fallbackText als Fallback wenn text=null</span></div>
-        <div class="norm-rule"><span class="nr-type">custom data</span><span class="nr-arrow">→</span><span class="nr-out"><span class="always">TextPart</span>: JSON.stringify summary · <span class="opt">DataPart</span>: raw object direkt</span></div>
+        <div class="box-tit">normalizeOutput(cognigyOutput) → NormalizedOutput</div>
+
+        <div class="norm-section">
+          <div class="norm-section-hdr norm-section-status">kind: 'status-message' → TaskStatusUpdateEvent { state:'working', message:{ parts } }</div>
+          <div class="norm-rule"><span class="nr-type">text (plain)</span><span class="nr-arrow">→</span><span class="nr-out"><span class="always">TextPart</span>: output.text direkt</span></div>
+          <div class="norm-rule"><span class="nr-type">_quickReplies</span><span class="nr-arrow">→</span><span class="nr-out"><span class="always">TextPart</span>: label + "- Option A\n- Option B" · <span class="opt">DataPart</span>: {type:"quick_replies", payload:{...}}</span></div>
+          <div class="norm-rule"><span class="nr-type">_buttons</span><span class="nr-arrow">→</span><span class="nr-out"><span class="always">TextPart</span>: label + "- Button 1\n- Button 2" · <span class="opt">DataPart</span>: {type:"buttons", payload:{...}}</span></div>
+          <div class="norm-rule"><span class="nr-type">_list</span><span class="nr-arrow">→</span><span class="nr-out"><span class="always">TextPart</span>: header + "- Titel: Subtitle" · <span class="opt">DataPart</span>: {type:"list", payload:{...}}</span></div>
+          <div class="norm-rule"><span class="nr-type">_gallery</span><span class="nr-arrow">→</span><span class="nr-out"><span class="always">TextPart</span>: output.text oder "Here are some options:" + items · <span class="opt">DataPart</span>: {type:"carousel", payload:{...}}</span></div>
+          <div class="norm-rule"><span class="nr-type">_adaptiveCard</span><span class="nr-arrow">→</span><span class="nr-out"><span class="always">TextPart</span>: TextBlocks + FactSet + Input labels + Actions (rekursiv) · <span class="opt">DataPart</span>: {type:"AdaptiveCard", payload:{...}}</span></div>
+          <div class="norm-rule"><span class="nr-type">custom data</span><span class="nr-arrow">→</span><span class="nr-out"><span class="always">TextPart</span>: _fallbackText (wenn vorhanden) · <span class="opt">DataPart</span>: {type:"cognigy/data", payload:{...}} · _cognigy/_fallbackText gestripped</span></div>
+        </div>
+
+        <div class="norm-section">
+          <div class="norm-section-hdr norm-section-artifact">kind: 'artifact' → TaskArtifactUpdateEvent { artifact:{ FilePart + TextPart } }</div>
+          <div class="norm-rule"><span class="nr-type">_image</span><span class="nr-arrow">→</span><span class="nr-out"><span class="media">FilePart</span>: {uri, mimeType: image/*, name} + <span class="always">TextPart</span>: "[Image: url]" · MIME aus Extension inferiert</span></div>
+          <div class="norm-rule"><span class="nr-type">_audio</span><span class="nr-arrow">→</span><span class="nr-out"><span class="media">FilePart</span>: {uri, mimeType: audio/*, name} + <span class="always">TextPart</span>: "[Audio: url]" · MIME aus Extension inferiert</span></div>
+          <div class="norm-rule"><span class="nr-type">_video</span><span class="nr-arrow">→</span><span class="nr-out"><span class="media">FilePart</span>: {uri, mimeType: video/*, name} + <span class="always">TextPart</span>: "[Video: url]" · MIME aus Extension inferiert</span></div>
+        </div>
+
+        <div style="margin-top:8px;font-size:9px;color:var(--muted)">Goldene Regel: TextPart IMMER vorhanden — LLM-Agents können jeden Output lesen. DataPart/FilePart: Optimierung für Rich-Clients. Ignorieren ist always safe.</div>
       </div>
     </div>
   </div>
 
-  <!-- ═══════════════════════════════════════════════════════════ -->
   <!-- LAYER 2b: SOCKET CONNECTION MANAGEMENT -->
-  <!-- ═══════════════════════════════════════════════════════════ -->
   <div class="layer L-socket-mgmt">
-    <span class="layer-tag">Layer 2b — Socket Connection Management <span class="new-badge">NEU</span></span>
+    <span class="layer-tag">Layer 2b — Socket Connection Management</span>
 
     <div class="grid2" style="gap:12px">
 
@@ -350,9 +368,7 @@ html.light #theme-toggle { background:#fff; box-shadow:0 2px 12px rgba(0,0,0,.1)
         <div class="box B-pool" style="min-height:180px">
           <div class="tag T-pool">Pool Strategy</div>
           <div class="box-tit">1 Connection pro Agent-Endpoint</div>
-          <div class="box-sub" style="margin-bottom:10px">Nicht 1 Connection pro Request — eine stabile, persistente Verbindung pro Cognigy-Endpoint, die für ALLE parallelen Sessions desselben Agents genutzt wird.</div>
-
-          <!-- Pool Matrix -->
+          <div class="box-sub" style="margin-bottom:10px">Eine stabile, persistente Verbindung pro Cognigy-Endpoint — genutzt für ALLE parallelen Sessions desselben Agents.</div>
           <div class="pool-matrix">
             <div class="pm-row">
               <div class="pm-label"></div>
@@ -374,11 +390,6 @@ html.light #theme-toggle { background:#fff; box-shadow:0 2px 12px rgba(0,0,0,.1)
               <div class="pm-cell pm-active">↔ aktiv</div>
               <div class="pm-cell pm-idle">—</div>
             </div>
-            <div class="pm-row">
-              <div class="pm-label">Session ctx-003</div>
-              <div class="pm-cell pm-idle">wartend</div>
-              <div class="pm-cell pm-idle">—</div>
-            </div>
           </div>
           <div style="margin-top:8px;font-size:9px;color:var(--muted)">→ Viele Sessions teilen 1 Connection (Multiplexing via sessionId)</div>
         </div>
@@ -393,23 +404,15 @@ html.light #theme-toggle { background:#fff; box-shadow:0 2px 12px rgba(0,0,0,.1)
           <div class="sock-flow">
             <div class="sf-row">
               <div class="sf-icon" style="background:#1a0500">🔴</div>
-              <div><div class="sf-label" style="color:#ff7043">Disconnect erkannt</div><div class="sf-detail"><code>on("disconnect")</code> Event · Grund klassifiziert: network / server / auth</div></div>
+              <div><div class="sf-label" style="color:#ff7043">Disconnect erkannt</div><div class="sf-detail"><code>on("disconnect")</code> · Grund klassifiziert: network / server / auth</div></div>
             </div>
             <div class="sf-row">
               <div class="sf-icon" style="background:#150b00">⏱</div>
-              <div><div class="sf-label" style="color:#fbbf24">Attempt 1: 1s</div><div class="sf-detail">Sofort · wahrscheinlich transient</div></div>
-            </div>
-            <div class="sf-row">
-              <div class="sf-icon" style="background:#150b00">⏱</div>
-              <div><div class="sf-label" style="color:#fbbf24">Attempt 2: 2s</div><div class="sf-detail">Doppelt · + zufälliger Jitter ±20%</div></div>
-            </div>
-            <div class="sf-row">
-              <div class="sf-icon" style="background:#150b00">⏱</div>
-              <div><div class="sf-label" style="color:#fbbf24">Attempt 3–5: 4s→30s</div><div class="sf-detail">Max 30s Cap · danach Error propagiert</div></div>
+              <div><div class="sf-label" style="color:#fbbf24">Attempts 1–6: 1s→30s</div><div class="sf-detail">Exponential · +±20% Jitter · max 30s Cap</div></div>
             </div>
             <div class="sf-row">
               <div class="sf-icon" style="background:#0a1200">✅</div>
-              <div><div class="sf-label" style="color:#34d399">Reconnected</div><div class="sf-detail">Pending Messages werden re-sent · Sessions wiederhergestellt</div></div>
+              <div><div class="sf-label" style="color:#34d399">Reconnected</div><div class="sf-detail">Pending Messages re-sent · Sessions wiederhergestellt</div></div>
             </div>
           </div>
           <div style="margin-top:8px;font-size:9px;color:var(--muted)">Auth-Fehler → kein Retry (fail fast) · Network-Fehler → Retry</div>
@@ -425,22 +428,21 @@ html.light #theme-toggle { background:#fff; box-shadow:0 2px 12px rgba(0,0,0,.1)
           <div class="sock-flow">
             <div class="sf-row">
               <div class="sf-icon" style="background:#001a2a">🔵</div>
-              <div><div class="sf-label" style="color:#60a5fa">CONNECTING</div><div class="sf-detail">SocketClient.connect() · Token-Auth läuft · Timeout: 5s</div></div>
+              <div><div class="sf-label" style="color:#60a5fa">CONNECTING</div><div class="sf-detail">SocketClient.connect() · Token-Auth · Timeout: 5s</div></div>
             </div>
             <div class="sf-row">
               <div class="sf-icon" style="background:#002010">🟢</div>
-              <div><div class="sf-label" style="color:#34d399">IDLE</div><div class="sf-detail">Verbunden · keine aktive Session · keepalive ping alle 30s</div></div>
+              <div><div class="sf-label" style="color:#34d399">IDLE</div><div class="sf-detail">Verbunden · keepalive ping alle 30s · nach 5min → disconnect</div></div>
             </div>
             <div class="sf-row">
               <div class="sf-icon" style="background:#1a1000">🟡</div>
-              <div><div class="sf-label" style="color:#fbbf24">ACTIVE</div><div class="sf-detail">≥1 Session läuft · Nachrichten fließen · finalPing erwartet</div></div>
+              <div><div class="sf-label" style="color:#fbbf24">ACTIVE</div><div class="sf-detail">≥1 Session läuft · finalPing erwartet</div></div>
             </div>
             <div class="sf-row">
               <div class="sf-icon" style="background:#1a0000">🔴</div>
-              <div><div class="sf-label" style="color:#f87171">DEAD</div><div class="sf-detail">Max Retries erreicht · aus Pool entfernt · alle Sessions failed</div></div>
+              <div><div class="sf-label" style="color:#f87171">DEAD</div><div class="sf-detail">Max Retries erreicht · alle Sessions failed</div></div>
             </div>
           </div>
-          <div style="margin-top:8px;font-size:9px;color:var(--muted)">IDLE → gelöscht nach 5min Inaktivität (konfigurierbar)</div>
         </div>
       </div>
 
@@ -450,9 +452,6 @@ html.light #theme-toggle { background:#fff; box-shadow:0 2px 12px rgba(0,0,0,.1)
         <div class="box B-multiplex">
           <div class="tag T-multiplex">Multiplexing</div>
           <div class="box-tit">sessionId als Routing-Key</div>
-          <div class="box-sub" style="margin-bottom:10px">
-            @cognigy/socket-client isoliert Sessions via <code style="color:var(--cyan)">sessionId</code>. Cognigy routet jeden Output zurück zur richtigen Session. Das Gateway mappt sessionId → A2A-TaskId → SSE-Stream.
-          </div>
           <div class="sock-flow">
             <div class="sf-row">
               <div class="sf-icon" style="background:#001a15">↔</div>
@@ -501,7 +500,7 @@ html.light #theme-toggle { background:#fff; box-shadow:0 2px 12px rgba(0,0,0,.1)
       <div class="box B-cog-sock">
         <div class="tag" style="background:#3d2a0a;color:var(--orange)">SOCKET.IO ENDPOINT</div>
         <div class="box-tit">Agentic AI Flow</div>
-        <div class="box-sub">LLM Reasoning · Tool Calls · MCP<br>emit("output") mehrfach live<br>emit("finalPing") → Flow fertig<br>Use case: Booking, Complex Tasks</div>
+        <div class="box-sub">LLM Reasoning · Tool Calls · MCP<br>emit("output") mehrfach live<br>emit("finalPing") → Flow fertig<br>Text · QuickReplies · Gallery · Image · Audio · Video</div>
       </div>
     </div>
   </div>
@@ -511,10 +510,10 @@ html.light #theme-toggle { background:#fff; box-shadow:0 2px 12px rgba(0,0,0,.1)
 <div class="legend">
   <div class="leg"><div class="leg-dot" style="background:#1e3d6b"></div>Consumer Layer</div>
   <div class="leg"><div class="leg-dot" style="background:#1a3d28"></div>Gateway Service</div>
-  <div class="leg"><div class="leg-dot" style="background:#3d2a08"></div>Socket Connection Management (NEU)</div>
+  <div class="leg"><div class="leg-dot" style="background:#3d2a08"></div>Socket Connection Management</div>
   <div class="leg"><div class="leg-dot" style="background:#2a1d4a"></div>Cognigy Platform</div>
-  <div class="leg"><span class="ptag ptag-a2a">A2A</span>JSON-RPC / SSE</div>
-  <div class="leg"><span class="ptag ptag-pool">POOL</span>Persistente WS · Multiplexed Sessions</div>
+  <div class="leg"><span class="ptag ptag-sse">SSE</span>status-message → TaskStatusUpdateEvent</div>
+  <div class="leg"><span class="ptag ptag-pool">ARTIFACT</span>image/audio/video → TaskArtifactUpdateEvent</div>
 </div>
 </body>
 </html>

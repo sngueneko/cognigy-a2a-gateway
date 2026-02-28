@@ -300,9 +300,9 @@ html.light .theme-pink   { --card-accent: #db2777; }
 </header>
 
 <div class="stats">
-  <div class="stat"><span class="stat-num">6</span><span class="stat-lbl">Decisions</span></div>
-  <div class="stat"><span class="stat-num">4</span><span class="stat-lbl">Verworfene Alternativen</span></div>
-  <div class="stat"><span class="stat-num">1</span><span class="stat-lbl">Offener Punkt</span></div>
+  <div class="stat"><span class="stat-num">8</span><span class="stat-lbl">Decisions</span></div>
+  <div class="stat"><span class="stat-num">6</span><span class="stat-lbl">Verworfene Alternativen</span></div>
+  <div class="stat"><span class="stat-num">0</span><span class="stat-lbl">Offene Punkte</span></div>
 </div>
 
 <div class="grid">
@@ -506,6 +506,77 @@ html.light .theme-pink   { --card-accent: #db2777; }
     </div>
   </div>
 
+<!-- 07 -->
+  <div class="card theme-cyan" data-cat="data" onclick="toggleCard(this)">
+    <div class="card-header">
+      <div class="card-num">07</div>
+      <div class="card-meta">
+        <div class="card-category">Data Model</div>
+        <div class="card-title">NormalizedOutput als Discriminated Union â€” StatusMessage vs Artifact</div>
+      </div>
+      <div class="card-verdict">
+        <span class="verdict-tag vt-decided">Entschieden</span>
+        <span class="chevron">â–¼</span>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="sections">
+        <div class="section sec-challenge">
+          <div class="section-label"><span class="dot"></span>Challenge</div>
+          <div class="section-text">Der OutputNormalizer gab bisher ein flaches <code>Part[]</code> zurÃ¼ck â€” ohne Information darÃ¼ber, <strong>in welchen A2A Event-Typ</strong> das Ergebnis gehÃ¶rt. Der Executor konnte nicht zwischen conversational outputs (â†’ <code>TaskStatusUpdateEvent</code>) und Media-Files (â†’ <code>TaskArtifactUpdateEvent</code>) unterscheiden. Das fÃ¼hrte dazu, dass alle Outputs â€” auch Bilder und Videos â€” als Status-Messages landen, statt als echte A2A Artifacts. ZusÃ¤tzlich fehlten Image/Audio/Video komplett als Output-Typen.</div>
+          <div class="rejected">Part[] ohne kind â€” Executor entscheidet blind</div>
+          <div class="rejected">Separater Normalizer pro Event-Typ</div>
+        </div>
+        <div class="section sec-decision">
+          <div class="section-label"><span class="dot"></span>Decision</div>
+          <div class="section-text">Der Normalizer gibt ein <strong>Discriminated Union</strong> zurÃ¼ck:
+            <code>NormalizedOutput = StatusMessageOutput | ArtifactOutput</code>.
+            <code>StatusMessageOutput</code> trÃ¤gt <code>Part[]</code> fÃ¼r <code>TaskStatusUpdateEvent.status.message</code>.
+            <code>ArtifactOutput</code> trÃ¤gt <code>Part[]</code> + <code>mimeType</code> + <code>name</code> + <code>fileUrl</code> fÃ¼r <code>TaskArtifactUpdateEvent</code>.
+            Der Executor liest <code>normalized.kind</code> und routet entsprechend. MIME-Typen werden automatisch aus der URL-Extension inferiert.</div>
+          <div class="chosen">NormalizedOutput discriminated union Â· Executor routet per kind</div>
+        </div>
+        <div class="section sec-why">
+          <div class="section-label"><span class="dot"></span>Warum</div>
+          <div class="section-text"><strong>A2A-KonformitÃ¤t.</strong> Die A2A Spec unterscheidet explizit zwischen conversational messages und binary artifacts. Ein Bild als <code>TaskStatusUpdateEvent</code> zu senden wÃ¤re technisch falsch. <code>TaskArtifactUpdateEvent</code> trÃ¤gt MIME-Typ, Dateiname und URI â€” genau was ein Downstream-Agent oder UI braucht um das File korrekt zu verarbeiten. Die Discriminated Union macht diese Entscheidung zur Compile-Zeit sicher: der TypeScript-Compiler erzwingt vollstÃ¤ndiges Handling beider FÃ¤lle im Executor.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- 08 -->
+  <div class="card theme-green" data-cat="data" onclick="toggleCard(this)">
+    <div class="card-header">
+      <div class="card-num">08</div>
+      <div class="card-meta">
+        <div class="card-category">Data Model</div>
+        <div class="card-title">Markdown imageUrl im TextPart — LLM-lesbare Medien-Referenzen</div>
+      </div>
+      <div class="card-verdict">
+        <span class="verdict-tag vt-decided">Entschieden</span>
+        <span class="chevron">›</span>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="sections">
+        <div class="section sec-challenge">
+          <div class="section-label"><span class="dot"></span>Challenge</div>
+          <div class="section-text">Gallery-, List-, QuickReplies- und Button-Outputs enthalten <code>imageUrl</code>-Felder pro Item, die bisher komplett aus dem <code>TextPart</code> gefiltert wurden. Ein LLM-Agent, der den TextPart liest, hatte keine Chance, das Bild zu sehen, zu beschreiben oder weiterzuleiten — obwohl die URL vorhanden war. Das Gateway war für LLM-to-LLM A2A-Flows konzipiert, verhielt sich aber wie ein Screen-Reader ohne Bild-Support.</div>
+          <div class="rejected">imageUrl nur im DataPart — LLM-Agents müssen DataPart kennen</div>
+          <div class="rejected">Separates ArtifactUpdate pro item-imageUrl — zu viele Events, falsche Semantik</div>
+          <div class="rejected">imageUrl komplett ignorieren — Informationsverlust für LLM-Consumers</div>
+        </div>
+        <div class="section sec-decision">
+          <div class="section-label"><span class="dot"></span>Decision</div>
+          <div class="section-text">Alle Renderer (<code>renderGallery</code>, <code>renderList</code>, <code>renderQuickReplies</code>, <code>renderButtons</code>) hängen <code>imageUrl</code> als Markdown-Syntax an jede Zeile an, wenn non-empty: <code>- Titel: Subtitle ![image](https://...)</code>. Web-URL-Buttons bekommen die URL inline: <code>- Button: https://...</code>. Leer-Strings werden nicht emittiert.</div>
+          <div class="chosen">![image](url) Markdown-Syntax im TextPart — jeder LLM versteht es</div>
+        </div>
+        <div class="section sec-why">
+          <div class="section-label"><span class="dot"></span>Warum</div>
+          <div class="section-text"><strong>LLM-nativer Standard.</strong> Claude, GPT-4, Gemini und jeder andere LLM rendern <code>![alt](url)</code> entweder als inline-Bild oder als anklickbaren Link — ohne Vorkenntnisse über das Cognigy-Datenformat. Das Gateway ist primär für LLM-to-LLM A2A-Kommunikation gebaut; der TextPart muss alleine ausreichen. Das Webchat-UI (Referenz-Implementierung) wurde parallel mit <code>react-markdown</code> ausgestattet, sodass Markdown-Bilder, Links und Listen nativ gerendert werden — genau wie in Claude.ai oder ChatGPT.</div>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -541,6 +612,12 @@ function filterCards(cat, btn) {
 
 // Open first card by default
 document.querySelector('.card').classList.add('open');
+
+// Update stat count dynamically
+function updateStats() {
+  const visible = document.querySelectorAll('.card:not(.hidden)');
+  // keep static for now
+}
 </script>
 </body>
 </html>

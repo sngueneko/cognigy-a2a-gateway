@@ -1,3 +1,20 @@
+/**
+ * @fileoverview Tests for CognigyAgentExecutor.
+ *
+ * Event routing rules under test:
+ *
+ * SOCKET adapter:
+ *   - text/UI outputs → TaskStatusUpdateEvent { state:'working', message: { parts } }
+ *   - media outputs   → TaskArtifactUpdateEvent { FilePart }
+ *   - lifecycle:      working (open) → [working+message / artifact]... → completed (close)
+ *   - on error:       working (open) → failed (close)
+ *
+ * REST adapter:
+ *   - all outputs → single Message { parts: [...all flattened...] }
+ *   - no task lifecycle events (no status-update)
+ *   - on error: single error Message
+ */
+
 import { CognigyAgentExecutor } from '../../src/handlers/CognigyAgentExecutor';
 import { taskSessionRegistry } from '../../src/task/TaskSessionRegistry';
 import type { ResolvedAgentConfig } from '../../src/types/agent.types';
@@ -8,7 +25,7 @@ import type { AdapterSendParams } from '../../src/adapters/IAdapter';
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
-// RestAdapter mock: ignores onOutput, returns two outputs at once
+// RestAdapter: returns two plain text outputs
 jest.mock('../../src/adapters/RestAdapter', () => ({
   RestAdapter: jest.fn().mockImplementation(() => ({
     type: 'REST',
@@ -19,7 +36,7 @@ jest.mock('../../src/adapters/RestAdapter', () => ({
   })),
 }));
 
-// SocketAdapter mock: calls onOutput for each output synchronously, then resolves
+// SocketAdapter: streams three plain text outputs then resolves
 jest.mock('../../src/adapters/SocketAdapter', () => ({
   SocketAdapter: jest.fn().mockImplementation(() => ({
     type: 'SOCKET',
@@ -95,30 +112,31 @@ describe('CognigyAgentExecutor', () => {
   // ── REST adapter ──────────────────────────────────────────────────────────
 
   describe('REST adapter — Message only (no task lifecycle)', () => {
-    it('publishes only a final Message — no status-update, no artifact-update', async () => {
+    it('publishes exactly one event: the final Message', async () => {
       const executor = new CognigyAgentExecutor(restConfig);
       const eventBus = makeEventBus();
       await executor.execute(makeRequestContext(), eventBus);
 
       const events = eventBus.publish.mock.calls.map(c => c[0] as { kind: string });
 
-      // Exactly one event: the final Message
       expect(events).toHaveLength(1);
       expect(events[0]?.kind).toBe('message');
       expect(events.some(e => e.kind === 'status-update')).toBe(false);
       expect(events.some(e => e.kind === 'artifact-update')).toBe(false);
-
       expect(eventBus.finished).toHaveBeenCalledTimes(1);
     });
 
-    it('final Message contains all normalised parts from all outputs', async () => {
+    it('Message contains all normalised parts from all outputs (one TextPart per output)', async () => {
       const executor = new CognigyAgentExecutor(restConfig);
       const eventBus = makeEventBus();
       await executor.execute(makeRequestContext(), eventBus);
 
       const msg = eventBus.publish.mock.calls[0]?.[0] as Message;
       expect(msg.kind).toBe('message');
-      expect(msg.parts.length).toBeGreaterThanOrEqual(2); // one per output
+      // Two outputs → two TextParts
+      expect(msg.parts).toHaveLength(2);
+      expect((msg.parts[0] as { kind: string; text: string }).text).toBe('Hello from Cognigy');
+      expect((msg.parts[1] as { kind: string; text: string }).text).toBe('Second output');
     });
 
     it('publishes error Message on adapter failure — no task events', async () => {
@@ -136,78 +154,79 @@ describe('CognigyAgentExecutor', () => {
       expect(events[0]?.kind).toBe('message');
       const part = (events[0] as Message).parts[0] as { kind: string; text: string };
       expect(part.text).toContain('error');
+      expect(eventBus.finished).toHaveBeenCalledTimes(1);
     });
   });
 
-  // ── SOCKET adapter ────────────────────────────────────────────────────────
+  // ── SOCKET adapter — text/UI outputs ─────────────────────────────────────
 
-  describe('SOCKET adapter — Task lifecycle with streaming', () => {
-    it('event sequence: working → artifact(s) → completed', async () => {
+  describe('SOCKET adapter — text outputs → TaskStatusUpdateEvent with message', () => {
+    it('event sequence: working (open) → working+message × N → completed (close)', async () => {
       const executor = new CognigyAgentExecutor(socketConfig);
       const eventBus = makeEventBus();
       await executor.execute(makeRequestContext(), eventBus);
 
       const events = eventBus.publish.mock.calls.map(c => c[0] as { kind: string });
 
-      // First: working status
+      // First event: working open (no message)
       expect(events[0]?.kind).toBe('status-update');
-      expect((events[0] as TaskStatusUpdateEvent).status.state).toBe('working');
-      expect((events[0] as TaskStatusUpdateEvent).final).toBe(false);
+      const openEvent = events[0] as TaskStatusUpdateEvent;
+      expect(openEvent.status.state).toBe('working');
+      expect(openEvent.final).toBe(false);
+      expect(openEvent.status.message).toBeUndefined();
 
-      // Middle: artifact-updates
-      const artifacts = events.filter(e => e.kind === 'artifact-update');
-      expect(artifacts.length).toBeGreaterThan(0);
+      // Middle events: working with message (one per text output)
+      const workingWithMessage = events.filter(e => {
+        if (e.kind !== 'status-update') return false;
+        const ev = e as TaskStatusUpdateEvent;
+        return ev.status.state === 'working' && ev.status.message !== undefined;
+      });
+      expect(workingWithMessage.length).toBe(3); // 3 text outputs
 
-      // Last: completed status
+      // Last event: completed (final)
       const last = events[events.length - 1] as TaskStatusUpdateEvent;
       expect(last.kind).toBe('status-update');
       expect(last.status.state).toBe('completed');
       expect(last.final).toBe(true);
 
-      // No Message published
+      // No Message, no artifact-update
       expect(events.some(e => e.kind === 'message')).toBe(false);
+      expect(events.some(e => e.kind === 'artifact-update')).toBe(false);
 
       expect(eventBus.finished).toHaveBeenCalledTimes(1);
     });
 
-    it('publishes one artifact-update per Cognigy output (3 outputs → 3 artifacts)', async () => {
+    it('each working+message event has correct TextPart content', async () => {
       const executor = new CognigyAgentExecutor(socketConfig);
       const eventBus = makeEventBus();
       await executor.execute(makeRequestContext(), eventBus);
 
-      const artifacts = eventBus.publish.mock.calls
-        .map(c => c[0] as TaskArtifactUpdateEvent)
-        .filter(e => e.kind === 'artifact-update');
+      const messageEvents = eventBus.publish.mock.calls
+        .map(c => c[0] as TaskStatusUpdateEvent)
+        .filter(e => e.kind === 'status-update' && e.status.message !== undefined);
 
-      expect(artifacts).toHaveLength(3);
+      expect(messageEvents).toHaveLength(3);
+      const texts = messageEvents.map(e => (e.status.message?.parts[0] as { text: string }).text);
+      expect(texts).toEqual(['Streaming part 1', 'Streaming part 2', 'Streaming part 3']);
     });
 
-    it('all artifacts have lastChunk:false (stream end signalled by completed status)', async () => {
+    it('each working+message has role:agent and valid messageId', async () => {
       const executor = new CognigyAgentExecutor(socketConfig);
       const eventBus = makeEventBus();
       await executor.execute(makeRequestContext(), eventBus);
 
-      const artifacts = eventBus.publish.mock.calls
-        .map(c => c[0] as TaskArtifactUpdateEvent)
-        .filter(e => e.kind === 'artifact-update');
+      const messageEvents = eventBus.publish.mock.calls
+        .map(c => c[0] as TaskStatusUpdateEvent)
+        .filter(e => e.kind === 'status-update' && e.status.message !== undefined);
 
-      artifacts.forEach(a => expect(a.lastChunk).toBe(false));
+      for (const ev of messageEvents) {
+        expect(ev.status.message?.role).toBe('agent');
+        expect(ev.status.message?.messageId).toBeTruthy();
+        expect(ev.status.message?.kind).toBe('message');
+      }
     });
 
-    it('each artifact has a unique artifactId', async () => {
-      const executor = new CognigyAgentExecutor(socketConfig);
-      const eventBus = makeEventBus();
-      await executor.execute(makeRequestContext(), eventBus);
-
-      const artifacts = eventBus.publish.mock.calls
-        .map(c => c[0] as TaskArtifactUpdateEvent)
-        .filter(e => e.kind === 'artifact-update');
-
-      const ids = artifacts.map(a => a.artifact.artifactId);
-      expect(new Set(ids).size).toBe(ids.length);
-    });
-
-    it('publishes failed status on adapter error — no Message', async () => {
+    it('publishes failed status on adapter error — no artifact-update, no Message', async () => {
       const { SocketAdapter } = jest.requireMock('../../src/adapters/SocketAdapter') as { SocketAdapter: jest.Mock };
       SocketAdapter.mockImplementationOnce(() => ({
         type: 'SOCKET',
@@ -219,7 +238,6 @@ describe('CognigyAgentExecutor', () => {
 
       const events = eventBus.publish.mock.calls.map(c => c[0] as { kind: string });
 
-      // working → failed (no Message)
       expect(events[0]?.kind).toBe('status-update');
       expect((events[0] as TaskStatusUpdateEvent).status.state).toBe('working');
 
@@ -229,7 +247,170 @@ describe('CognigyAgentExecutor', () => {
       expect(last.final).toBe(true);
 
       expect(events.some(e => e.kind === 'message')).toBe(false);
+      expect(events.some(e => e.kind === 'artifact-update')).toBe(false);
       expect(eventBus.finished).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // ── SOCKET adapter — media outputs ────────────────────────────────────────
+
+  describe('SOCKET adapter — media outputs → TaskArtifactUpdateEvent', () => {
+    function makeSocketWithMedia() {
+      const { SocketAdapter } = jest.requireMock('../../src/adapters/SocketAdapter') as { SocketAdapter: jest.Mock };
+      SocketAdapter.mockImplementationOnce(() => ({
+        type: 'SOCKET',
+        send: jest.fn().mockImplementation(async (params: AdapterSendParams) => {
+          const outputs = [
+            { text: 'Here is an image', data: undefined },
+            { text: null, data: { _image: { type: 'image', imageUrl: 'https://cdn.example.com/photo.png' } } },
+            { text: null, data: { _audio: { type: 'audio', audioUrl: 'https://cdn.example.com/song.mp3' } } },
+            { text: null, data: { _video: { type: 'video', videoUrl: 'https://cdn.example.com/clip.mp4' } } },
+          ];
+          if (params.onOutput) {
+            outputs.forEach((o, i) => params.onOutput!(o, i));
+          }
+          return outputs;
+        }),
+      }));
+    }
+
+    it('image output → TaskArtifactUpdateEvent with FilePart', async () => {
+      makeSocketWithMedia();
+      const executor = new CognigyAgentExecutor(socketConfig);
+      const eventBus = makeEventBus();
+      await executor.execute(makeRequestContext(), eventBus);
+
+      const artifacts = eventBus.publish.mock.calls
+        .map(c => c[0] as TaskArtifactUpdateEvent)
+        .filter(e => e.kind === 'artifact-update');
+
+      expect(artifacts.length).toBeGreaterThanOrEqual(1);
+
+      const imgArtifact = artifacts.find(a =>
+        a.artifact.parts.some(p => p.kind === 'file' && (p as { kind: string; file: { mimeType: string } }).file.mimeType.startsWith('image/')),
+      );
+      expect(imgArtifact).toBeDefined();
+      const filePart = imgArtifact?.artifact.parts.find(p => p.kind === 'file') as { kind: string; file: { uri: string; mimeType: string; name: string } };
+      expect(filePart?.file.uri).toBe('https://cdn.example.com/photo.png');
+      expect(filePart?.file.mimeType).toBe('image/png');
+      expect(filePart?.file.name).toBe('photo.png');
+    });
+
+    it('audio output → TaskArtifactUpdateEvent with audio/mpeg FilePart', async () => {
+      makeSocketWithMedia();
+      const executor = new CognigyAgentExecutor(socketConfig);
+      const eventBus = makeEventBus();
+      await executor.execute(makeRequestContext(), eventBus);
+
+      const artifacts = eventBus.publish.mock.calls
+        .map(c => c[0] as TaskArtifactUpdateEvent)
+        .filter(e => e.kind === 'artifact-update');
+
+      const audioArtifact = artifacts.find(a =>
+        a.artifact.parts.some(p => p.kind === 'file' && (p as { kind: string; file: { mimeType: string } }).file.mimeType.startsWith('audio/')),
+      );
+      expect(audioArtifact).toBeDefined();
+    });
+
+    it('video output → TaskArtifactUpdateEvent with video/mp4 FilePart', async () => {
+      makeSocketWithMedia();
+      const executor = new CognigyAgentExecutor(socketConfig);
+      const eventBus = makeEventBus();
+      await executor.execute(makeRequestContext(), eventBus);
+
+      const artifacts = eventBus.publish.mock.calls
+        .map(c => c[0] as TaskArtifactUpdateEvent)
+        .filter(e => e.kind === 'artifact-update');
+
+      const videoArtifact = artifacts.find(a =>
+        a.artifact.parts.some(p => p.kind === 'file' && (p as { kind: string; file: { mimeType: string } }).file.mimeType.startsWith('video/')),
+      );
+      expect(videoArtifact).toBeDefined();
+    });
+
+    it('each artifact has lastChunk:true and unique artifactId', async () => {
+      makeSocketWithMedia();
+      const executor = new CognigyAgentExecutor(socketConfig);
+      const eventBus = makeEventBus();
+      await executor.execute(makeRequestContext(), eventBus);
+
+      const artifacts = eventBus.publish.mock.calls
+        .map(c => c[0] as TaskArtifactUpdateEvent)
+        .filter(e => e.kind === 'artifact-update');
+
+      expect(artifacts.length).toBe(3); // image + audio + video
+      artifacts.forEach(a => expect(a.lastChunk).toBe(true));
+      const ids = artifacts.map(a => a.artifact.artifactId);
+      expect(new Set(ids).size).toBe(ids.length);
+    });
+
+    it('text output and media in same turn: status-update + artifact-update both emitted', async () => {
+      makeSocketWithMedia();
+      const executor = new CognigyAgentExecutor(socketConfig);
+      const eventBus = makeEventBus();
+      await executor.execute(makeRequestContext(), eventBus);
+
+      const events = eventBus.publish.mock.calls.map(c => c[0] as { kind: string });
+
+      const statusMessages = events.filter(e => {
+        if (e.kind !== 'status-update') return false;
+        return (e as TaskStatusUpdateEvent).status.message !== undefined;
+      });
+      const artifactUpdates = events.filter(e => e.kind === 'artifact-update');
+
+      expect(statusMessages.length).toBe(1);    // "Here is an image"
+      expect(artifactUpdates.length).toBe(3);   // image + audio + video
+    });
+  });
+
+  // ── SOCKET — structured outputs (quick replies) ───────────────────────────
+
+  describe('SOCKET adapter — structured outputs → status-update with TextPart + DataPart', () => {
+    it('quick replies output → status-update with message containing TextPart and DataPart', async () => {
+      const { SocketAdapter } = jest.requireMock('../../src/adapters/SocketAdapter') as { SocketAdapter: jest.Mock };
+      SocketAdapter.mockImplementationOnce(() => ({
+        type: 'SOCKET',
+        send: jest.fn().mockImplementation(async (params: AdapterSendParams) => {
+          const outputs = [{
+            text: null,
+            data: {
+              _quickReplies: {
+                type: 'quick_replies',
+                text: 'Choose an option',
+                quickReplies: [{ title: 'Option A' }, { title: 'Option B' }],
+              },
+            },
+          }];
+          if (params.onOutput) outputs.forEach((o, i) => params.onOutput!(o, i));
+          return outputs;
+        }),
+      }));
+
+      const executor = new CognigyAgentExecutor(socketConfig);
+      const eventBus = makeEventBus();
+      await executor.execute(makeRequestContext(), eventBus);
+
+      const statusMsg = eventBus.publish.mock.calls
+        .map(c => c[0] as TaskStatusUpdateEvent)
+        .find(e => e.kind === 'status-update' && e.status.message !== undefined);
+
+      expect(statusMsg).toBeDefined();
+      const parts = statusMsg?.status.message?.parts ?? [];
+      expect(parts.length).toBe(2);
+
+      const tp = parts[0] as { kind: string; text: string };
+      expect(tp.kind).toBe('text');
+      expect(tp.text).toContain('Choose an option');
+      expect(tp.text).toContain('- Option A');
+      expect(tp.text).toContain('- Option B');
+
+      const dp = parts[1] as { kind: string; data: { type: string } };
+      expect(dp.kind).toBe('data');
+      expect(dp.data.type).toBe('quick_replies');
+
+      // Must not produce artifact-update
+      const artifacts = eventBus.publish.mock.calls.filter(c => (c[0] as { kind: string }).kind === 'artifact-update');
+      expect(artifacts).toHaveLength(0);
     });
   });
 
@@ -324,12 +505,13 @@ describe('CognigyAgentExecutor', () => {
   });
 
   describe('status helpers', () => {
-    it('publishWorking emits non-final working status', () => {
+    it('publishWorking emits non-final working status without message', () => {
       const eventBus = makeEventBus();
       new CognigyAgentExecutor(restConfig).publishWorking(eventBus, 't1', 'c1');
       const ev = eventBus.publish.mock.calls[0]?.[0] as TaskStatusUpdateEvent;
       expect(ev.status.state).toBe('working');
       expect(ev.final).toBe(false);
+      expect(ev.status.message).toBeUndefined();
     });
 
     it('publishCompleted emits final completed status', () => {

@@ -2,7 +2,7 @@
 <html lang="de">
 <head>
 <meta charset="UTF-8">
-<title>Cognigy A2A Gateway — End-to-End Dataflow + Socket Connection Management</title>
+<title>Cognigy A2A Gateway — End-to-End Dataflow + Output Normalization</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Syne:wght@500;700;800&display=swap');
 *{margin:0;padding:0;box-sizing:border-box}
@@ -26,6 +26,7 @@ body{background:var(--bg);color:var(--txt);font-family:'IBM Plex Mono',monospace
 .tab:hover{border-color:#2a4060;color:var(--txt)}
 .tab.active{background:#0f1f35;border-color:var(--blue);color:var(--blue)}
 .tab.active-amber{background:#1a1000;border-color:var(--amber);color:var(--amber)}
+.tab.active-cyan{background:#041520;border-color:var(--cyan);color:var(--cyan)}
 
 .panel{display:none;max-width:1200px;margin:0 auto;animation:fadeIn .3s}
 .panel.active{display:block}
@@ -99,6 +100,36 @@ code{font-size:9.5px;color:var(--cyan);background:#071520;padding:1px 5px;border
 .p-code{background:#070e18;color:var(--cyan);border:1px solid #0d2035}
 .p-pool{background:#1a1000;color:var(--amber);border:1px solid #3d2a00}
 .p-err{background:#1a0505;color:var(--red);border:1px solid #3d1010}
+.p-art{background:#1a0800;color:var(--orange);border:1px solid #3d2000}
+.p-status{background:#071a10;color:var(--green);border:1px solid #1a4a28}
+
+/* ── NORMALIZER PANEL styles ── */
+.norm-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px}
+.norm-card{background:#0c1015;border:1px solid var(--border);border-radius:12px;padding:18px}
+.norm-card-title{font-family:'Syne',sans-serif;font-size:13px;font-weight:700;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+.norm-card-body{font-size:10px;color:var(--dim);line-height:1.7}
+
+.kind-tag{display:inline-block;font-size:9px;font-weight:700;padding:3px 10px;border-radius:4px;letter-spacing:1px;margin-bottom:8px}
+.kind-status{background:#071a10;color:var(--green);border:1px solid #1a4a28}
+.kind-artifact{background:#1a0800;color:var(--orange);border:1px solid #3d2000}
+
+.norm-table{width:100%;border-collapse:collapse;font-size:9.5px;margin-top:10px}
+.norm-table th{color:var(--muted);font-size:8.5px;letter-spacing:1.5px;text-transform:uppercase;padding:6px 8px;border-bottom:1px solid var(--border);text-align:left;font-weight:700}
+.norm-table td{padding:7px 8px;border-bottom:1px solid #0d1520;color:var(--dim);vertical-align:top;line-height:1.5}
+.norm-table td:first-child{color:var(--orange);font-weight:600}
+.norm-table td .t{color:var(--green)}.norm-table td .d{color:var(--blue)}.norm-table td .f{color:var(--orange)}
+.norm-table tr:last-child td{border-bottom:none}
+
+.mime-table{width:100%;border-collapse:collapse;font-size:9.5px;margin-top:8px}
+.mime-table td{padding:4px 8px;color:var(--dim);vertical-align:top}
+.mime-table td:first-child{color:var(--amber);font-weight:600;width:60px}
+.mime-table td:nth-child(2){color:var(--cyan);width:140px}
+
+/* card extraction tree */
+.card-tree{display:flex;flex-direction:column;gap:3px;margin-top:8px;font-size:9.5px}
+.ct-row{display:flex;align-items:flex-start;gap:8px;padding:4px 8px;border-radius:4px;background:#070e18;border:1px solid #0d1a28}
+.ct-type{color:var(--purple);font-weight:700;min-width:130px;flex-shrink:0}
+.ct-desc{color:var(--dim);line-height:1.5}
 
 /* ── SOCKET MANAGEMENT PANEL ── */
 .sm-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px}
@@ -113,24 +144,18 @@ code{font-size:9.5px;color:var(--cyan);background:#071520;padding:1px 5px;border
 .sm-state-desc{font-size:9.5px;color:var(--dim)}
 .sm-arrow{font-size:9px;color:var(--muted);padding:2px 0 2px 32px;display:flex;align-items:center;gap:6px}
 
-/* CONNECTING */
 .st-connecting{background:#070d1a;border-color:#1a3060;color:var(--blue)}
 .st-connecting .sm-state-dot{background:var(--blue)}
-/* IDLE */
 .st-idle{background:#060f09;border-color:#1a3d20;color:var(--green)}
 .st-idle .sm-state-dot{background:var(--green);animation:blink 2s infinite}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
-/* ACTIVE */
 .st-active{background:#120e00;border-color:#3d2800;color:var(--amber)}
 .st-active .sm-state-dot{background:var(--amber)}
-/* RECONNECTING */
 .st-reconn{background:#120700;border-color:#3a1a00;color:#ff7043}
 .st-reconn .sm-state-dot{background:#ff7043}
-/* DEAD */
 .st-dead{background:#110404;border-color:#3d1010;color:var(--red)}
 .st-dead .sm-state-dot{background:var(--red)}
 
-/* pool diagram */
 .pool-diagram{margin-top:10px}
 .pd-row{display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:9.5px}
 .pd-label{color:var(--muted);min-width:100px;flex-shrink:0}
@@ -141,14 +166,12 @@ code{font-size:9.5px;color:var(--cyan);background:#071520;padding:1px 5px;border
 .pd-sess-a{background:#081510;border:1px solid #1a3d20;color:#94e8d0}
 .pd-sess-i{background:#080808;border:1px solid #222;color:#444}
 
-/* backoff */
 .backoff-diagram{display:flex;align-items:flex-end;gap:6px;margin-top:12px;padding:12px;background:#080e18;border-radius:8px;border:1px solid var(--border)}
 .bd-bar-group{display:flex;flex-direction:column;align-items:center;gap:3px;flex:1}
 .bd-bar{border-radius:3px 3px 0 0;width:100%}
 .bd-time{font-size:8px;color:var(--amber);text-align:center}
 .bd-att{font-size:8px;color:var(--muted);text-align:center}
 
-/* timeline */
 .timeline{display:flex;flex-direction:column;gap:0}
 .tl-item{display:flex;gap:12px;padding:10px 0;border-bottom:1px solid #0d1520;font-size:10px}
 .tl-item:last-child{border-bottom:none}
@@ -158,39 +181,23 @@ code{font-size:9.5px;color:var(--cyan);background:#071520;padding:1px 5px;border
 .tl-event{color:#fff;font-weight:600;font-size:10px;margin-bottom:2px}
 .tl-detail{color:var(--dim);font-size:9.5px;line-height:1.5}
 
-/* new badge */
 .new-badge{display:inline-block;font-size:7px;font-weight:700;padding:2px 6px;border-radius:3px;background:#3d2a00;color:var(--amber);letter-spacing:1.5px;text-transform:uppercase;vertical-align:middle;margin-left:6px}
+.upd-badge{display:inline-block;font-size:7px;font-weight:700;padding:2px 6px;border-radius:3px;background:#0a2a3d;color:var(--cyan);letter-spacing:1.5px;text-transform:uppercase;vertical-align:middle;margin-left:6px}
 
 /* ── LIGHT MODE ── */
 html.light {
-  --bg:#f0f4f8;--s1:#e8edf4;
-  --border:#cbd5e1;
+  --bg:#f0f4f8;--s1:#e8edf4;--border:#cbd5e1;
   --blue:#1d4ed8;--cyan:#0e7490;--green:#047857;
   --orange:#c2410c;--purple:#6d28d9;--red:#b91c1c;--amber:#92400e;--lime:#4d7c0f;
   --txt:#1e293b;--muted:#64748b;--dim:#475569;
 }
 html.light body { background:var(--bg); color:var(--txt); }
 html.light .hdr h1 { color:#0f172a; }
-
-html.light .tabs { }
 html.light .tab { background:#fff; border-color:#e2e8f0; color:#64748b; }
 html.light .tab:hover { border-color:#94a3b8; color:#334155; }
 html.light .tab.active { background:#eff6ff; border-color:#1d4ed8; color:#1d4ed8; }
 html.light .tab.active-amber { background:#fffbeb; border-color:#d97706; color:#92400e; }
-
-html.light .panel { }
-
-/* Step numbers */
-html.light .sn-blue   { border-color:#3b82f6; background:#eff6ff; color:#1d4ed8; }
-html.light .sn-purple { border-color:#8b5cf6; background:#faf5ff; color:#6d28d9; }
-html.light .sn-orange { border-color:#f97316; background:#fff7ed; color:#c2410c; }
-html.light .sn-amber  { border-color:#f59e0b; background:#fffbeb; color:#92400e; }
-html.light .sn-green  { border-color:#22c55e; background:#f0fdf4; color:#15803d; }
-html.light .sn-cyan   { border-color:#06b6d4; background:#ecfeff; color:#0e7490; }
-html.light .sn-red    { border-color:#ef4444; background:#fff5f5; color:#b91c1c; }
-html.light .sn-lime   { border-color:#84cc16; background:#f7fee7; color:#4d7c0f; }
-
-/* Step lines */
+html.light .tab.active-cyan { background:#ecfeff; border-color:#0e7490; color:#0e7490; }
 html.light .step-body { border-color:#e2e8f0; }
 html.light .step-title { color:#0f172a; }
 html.light .step-desc { color:#475569; }
@@ -201,58 +208,75 @@ html.light .code-block .s { color:#15803d; }
 html.light .code-block .v { color:#c2410c; }
 html.light .code-block .c { color:#94a3b8; }
 html.light .code-block .e { color:#0e7490; }
-
-html.light .pill.p-in   { background:#eff6ff; color:#1d4ed8; border-color:#bfdbfe; }
-html.light .pill.p-out  { background:#f0fdf4; color:#15803d; border-color:#86efac; }
-html.light .pill.p-warn { background:#fffbeb; color:#92400e; border-color:#fde68a; }
-html.light .pill.p-code { background:#ecfeff; color:#0e7490; border-color:#a5f3fc; }
-html.light .pill.p-pool { background:#fffbeb; color:#92400e; border-color:#fde68a; }
-html.light .pill.p-err  { background:#fff5f5; color:#b91c1c; border-color:#fecaca; }
-
-/* Socket mgmt panel */
+html.light .sn-blue   { border-color:#3b82f6; background:#eff6ff; color:#1d4ed8; }
+html.light .sn-purple { border-color:#8b5cf6; background:#faf5ff; color:#6d28d9; }
+html.light .sn-orange { border-color:#f97316; background:#fff7ed; color:#c2410c; }
+html.light .sn-amber  { border-color:#f59e0b; background:#fffbeb; color:#92400e; }
+html.light .sn-green  { border-color:#22c55e; background:#f0fdf4; color:#15803d; }
+html.light .sn-cyan   { border-color:#06b6d4; background:#ecfeff; color:#0e7490; }
+html.light .sn-red    { border-color:#ef4444; background:#fff5f5; color:#b91c1c; }
+html.light .sn-lime   { border-color:#84cc16; background:#f7fee7; color:#4d7c0f; }
+html.light .p-in   { background:#eff6ff; color:#1d4ed8; border-color:#bfdbfe; }
+html.light .p-out  { background:#f0fdf4; color:#15803d; border-color:#86efac; }
+html.light .p-warn { background:#fffbeb; color:#92400e; border-color:#fde68a; }
+html.light .p-code { background:#ecfeff; color:#0e7490; border-color:#a5f3fc; }
+html.light .p-pool { background:#fffbeb; color:#92400e; border-color:#fde68a; }
+html.light .p-err  { background:#fff5f5; color:#b91c1c; border-color:#fecaca; }
+html.light .p-art  { background:#fff7ed; color:#c2410c; border-color:#fed7aa; }
+html.light .p-status { background:#f0fdf4; color:#15803d; border-color:#86efac; }
+html.light .norm-card { background:#fff; border-color:#e2e8f0; }
+html.light .norm-card-body { color:#475569; }
+html.light .kind-status { background:#f0fdf4; color:#15803d; border-color:#86efac; }
+html.light .kind-artifact { background:#fff7ed; color:#c2410c; border-color:#fed7aa; }
+html.light .norm-table th { color:#64748b; border-color:#e2e8f0; }
+html.light .norm-table td { border-color:#e2e8f0; color:#475569; }
+html.light .norm-table td .t { color:#047857; }
+html.light .norm-table td .d { color:#1d4ed8; }
+html.light .norm-table td .f { color:#c2410c; }
+html.light .mime-table td { color:#475569; }
+html.light .mime-table td:first-child { color:#92400e; }
+html.light .mime-table td:nth-child(2) { color:#0e7490; }
+html.light .ct-row { background:#f8fafc; border-color:#e2e8f0; }
+html.light .ct-type { color:#6d28d9; }
+html.light .ct-desc { color:#475569; }
 html.light .sm-card { background:#fff; border-color:#e2e8f0; }
 html.light .sm-card-body { color:#475569; }
 html.light .sm-state-desc { color:#475569; }
 html.light .sm-arrow { color:#94a3b8; }
-
 html.light .st-connecting { background:#eff6ff; border-color:#93c5fd; color:#1d4ed8; }
 html.light .st-idle       { background:#f0fdf4; border-color:#86efac; color:#15803d; }
 html.light .st-active     { background:#fffbeb; border-color:#fde68a; color:#92400e; }
 html.light .st-reconn     { background:#fff5f0; border-color:#fdba74; color:#c2410c; }
 html.light .st-dead       { background:#fff5f5; border-color:#fca5a5; color:#b91c1c; }
-
 html.light .pool-diagram .pd-conn.pd-active { background:#f0fdf4; border-color:#86efac; color:#15803d; }
 html.light .pool-diagram .pd-conn.pd-idle   { background:#f8fafc; border-color:#e2e8f0; color:#94a3b8; }
 html.light .pool-diagram .pd-sess.pd-sess-a { background:#ecfeff; border-color:#a5f3fc; color:#0e7490; }
 html.light .pool-diagram .pd-sess.pd-sess-i { background:#f8fafc; border-color:#e2e8f0; color:#cbd5e1; }
-html.light .pool-diagram .pd-label { color:#475569; }
-
 html.light .backoff-diagram { background:#f8fafc; border-color:#e2e8f0; }
-
 html.light .timeline .tl-item { border-color:#e2e8f0; }
 html.light .tl-time  { color:#92400e; }
 html.light .tl-event { color:#0f172a; }
 html.light .tl-detail{ color:#475569; }
+html.light .new-badge { background:#fef3c7; color:#92400e; }
+html.light .upd-badge { background:#cffafe; color:#0e7490; }
 
-/* ── TOGGLE BUTTON ── */
+/* toggle */
 #theme-toggle {
   position:fixed;top:18px;right:22px;z-index:1000;
   background:var(--s1);border:1px solid var(--border);
   border-radius:100px;padding:6px 14px 6px 10px;
   display:flex;align-items:center;gap:7px;cursor:pointer;
   font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:700;
-  color:var(--txt);letter-spacing:.5px;
-  transition:all .25s;box-shadow:0 2px 12px rgba(0,0,0,.2);
+  color:var(--txt);letter-spacing:.5px;transition:all .25s;box-shadow:0 2px 12px rgba(0,0,0,.2);
 }
 #theme-toggle:hover { transform:translateY(-1px); box-shadow:0 4px 20px rgba(0,0,0,.3); }
 #theme-toggle .ico { font-size:14px; line-height:1; }
 html.light #theme-toggle { background:#fff; box-shadow:0 2px 12px rgba(0,0,0,.1); }
-
 </style>
 </head>
 <body>
 
-<button id="theme-toggle" onclick="toggleTheme()" title="Light/Dark Mode umschalten">
+<button id="theme-toggle" onclick="toggleTheme()">
   <span class="ico" id="toggle-ico">☀️</span>
   <span id="toggle-lbl">Light Mode</span>
 </button>
@@ -263,9 +287,9 @@ html.light #theme-toggle { background:#fff; box-shadow:0 2px 12px rgba(0,0,0,.1)
   function updateBtn(t){
     const ico = document.getElementById('toggle-ico');
     const lbl = document.getElementById('toggle-lbl');
-    if(!ico || !lbl) return;
-    if(t==='light'){ ico.textContent='🌙'; lbl.textContent='Dark Mode'; }
-    else { ico.textContent='☀️'; lbl.textContent='Light Mode'; }
+    if(!ico||!lbl) return;
+    ico.textContent = t==='light' ? '🌙' : '☀️';
+    lbl.textContent = t==='light' ? 'Dark Mode' : 'Light Mode';
   }
   window.toggleTheme = function(){
     const isLight = document.documentElement.classList.toggle('light');
@@ -278,17 +302,17 @@ html.light #theme-toggle { background:#fff; box-shadow:0 2px 12px rgba(0,0,0,.1)
 
 <div class="hdr">
   <h1>Cognigy A2A Gateway — End-to-End Dataflow</h1>
-  <p>Vollständiger Nachrichtenfluss + Socket Connection Management</p>
+  <p>REST Flow · Socket Flow · Output Normalization · Socket Connection Management</p>
 </div>
 
-<!-- TABS -->
 <div class="tabs">
   <button class="tab active" onclick="showPanel('flow-rest', this)">REST Flow</button>
   <button class="tab" onclick="showPanel('flow-socket', this)">Socket Flow (Agentic)</button>
-  <button class="tab active-amber" onclick="showPanel('socket-mgmt', this)" style="border-color:#3d2800;color:var(--amber)">⚡ Socket Connection Management</button>
+  <button class="tab" onclick="showPanel('normalization', this)" style="border-color:#0e3d4a;color:var(--cyan)">⚡ Output Normalization</button>
+  <button class="tab active-amber" onclick="showPanel('socket-mgmt', this)" style="border-color:#3d2800;color:var(--amber)">🔌 Socket Connection Management</button>
 </div>
 
-<!-- ═══════════════════════════════════════ PANEL: REST FLOW ═══ -->
+<!-- ═══════════ REST FLOW ═══════════ -->
 <div class="panel active" id="flow-rest">
 <div class="flow">
 
@@ -300,10 +324,7 @@ html.light #theme-toggle { background:#fff; box-shadow:0 2px 12px rgba(0,0,0,.1)
       <div class="step-desc">Der Consumer sendet einen JSON-RPC Request. contextId identifiziert die Konversation, das Gateway erkennt aus der Registry: endpointType = "REST".</div>
       <div class="code-block">
 <span class="k">POST</span> /agents/billing-agent/a2a<br>
-{<br>
-&nbsp;&nbsp;<span class="e">contextId</span>: <span class="s">"ctx-invoice-42"</span>,<br>
-&nbsp;&nbsp;<span class="e">message</span>: { <span class="e">parts</span>: [{ <span class="e">kind</span>: <span class="s">"text"</span>, <span class="e">text</span>: <span class="s">"Zeig mir Rechnung #8821"</span> }] }<br>
-}
+{ <span class="e">contextId</span>: <span class="s">"ctx-invoice-42"</span>, <span class="e">message</span>: { <span class="e">parts</span>: [{ <span class="e">kind</span>: <span class="s">"text"</span>, <span class="e">text</span>: <span class="s">"Zeig mir Rechnung #8821"</span> }] } }
       </div>
     </div>
   </div>
@@ -313,7 +334,7 @@ html.light #theme-toggle { background:#fff; box-shadow:0 2px 12px rgba(0,0,0,.1)
     <div class="step-body">
       <div class="step-actor sa-purple">Gateway — Registry Lookup</div>
       <div class="step-title">Agent Registry → REST Adapter gewählt</div>
-      <div class="step-desc">Session Store: <code>cognigy.sessionId = "ctx-invoice-42"</code>. Adapter: <code>RestAdapter</code> mit axios. Kein Connection Management nötig.</div>
+      <div class="step-desc">Session Store: <code>cognigy.sessionId = "ctx-invoice-42"</code>. Adapter: <code>RestAdapter</code>. Kein Connection Management nötig.</div>
     </div>
   </div>
 
@@ -322,15 +343,9 @@ html.light #theme-toggle { background:#fff; box-shadow:0 2px 12px rgba(0,0,0,.1)
     <div class="step-body">
       <div class="step-actor sa-orange">Gateway → Cognigy REST</div>
       <div class="step-title">HTTP POST → Cognigy Standalone Flow</div>
-      <div class="step-desc">axios sendet synchronen Request. Timeout: 8 Sekunden. Cognigy verarbeitet den Flow deterministisch und gibt alle Outputs in <code>outputStack[]</code> zurück.</div>
+      <div class="step-desc">axios sendet synchronen Request. Timeout: 8 Sekunden. Cognigy gibt alle Outputs in <code>outputStack[]</code> zurück.</div>
       <div class="code-block">
-<span class="k">POST</span> https://endpoint.cognigy.ai/abc123<br>
-{ <span class="e">userId</span>: <span class="s">"a2a-gateway"</span>, <span class="e">sessionId</span>: <span class="s">"ctx-invoice-42"</span>,<br>
-&nbsp;&nbsp;<span class="e">text</span>: <span class="s">"Zeig mir Rechnung #8821"</span> }<br><br>
-<span class="c">← Response:</span><br>
-{ <span class="e">outputStack</span>: [<br>
-&nbsp;&nbsp;{ <span class="e">text</span>: <span class="s">"Rechnung #8821 vom 15.01.2025: 1.240,00 €"</span>, <span class="e">data</span>: {} }<br>
-]}
+<span class="c">← Response: { outputStack: [{ text: "Rechnung #8821 vom 15.01.2025: 1.240,00 €", data: {} }] }</span>
       </div>
     </div>
   </div>
@@ -338,11 +353,12 @@ html.light #theme-toggle { background:#fff; box-shadow:0 2px 12px rgba(0,0,0,.1)
   <div class="step">
     <div class="step-num-col"><div class="step-num sn-cyan">4</div><div class="step-line sl-cyan"></div></div>
     <div class="step-body">
-      <div class="step-actor sa-cyan">Gateway — Output Normalizer</div>
-      <div class="step-title">outputStack[] → A2A Parts normalisiert</div>
-      <div class="step-desc">Jeder Output wird normalisiert. text vorhanden → TextPart direkt. Fertig.</div>
+      <div class="step-actor sa-cyan">Gateway — OutputNormalizer</div>
+      <div class="step-title">normalizeOutputs(stack) → Part[] für Message</div>
+      <div class="step-desc">REST-Pfad: <code>normalizeOutputs()</code> ruft <code>normalizeOutput()</code> für jeden Output und flacht alle <code>NormalizedOutput.parts</code> in ein einziges <code>Part[]</code> ab. Media-Outputs (Image/Audio/Video) landen inline als FilePart, da kein Streaming möglich ist.</div>
       <div class="code-block">
-<span class="c">// Normalizer Output</span><br>
+<span class="c">// normalizeOutput → StatusMessageOutput { kind:'status-message', parts:[TextPart] }</span><br>
+<span class="c">// normalizeOutputs → flatten all .parts → Part[]</span><br>
 [{ <span class="e">kind</span>: <span class="s">"text"</span>, <span class="e">text</span>: <span class="s">"Rechnung #8821 vom 15.01.2025: 1.240,00 €"</span> }]
       </div>
     </div>
@@ -352,11 +368,10 @@ html.light #theme-toggle { background:#fff; box-shadow:0 2px 12px rgba(0,0,0,.1)
     <div class="step-num-col"><div class="step-num sn-green">5</div><div class="step-line sl-green"></div></div>
     <div class="step-body">
       <div class="step-actor sa-green">Gateway → A2A Client</div>
-      <div class="step-title">A2A Response mit Status "completed"</div>
-      <div class="step-desc">Ein einziger SSE-Block, Task sofort completed. Gesamtlatenz: Cognigy Flow-Zeit + Normalizer (typisch 1–4s).</div>
+      <div class="step-title">A2A Message Response — einmaliger vollständiger Block</div>
+      <div class="step-desc">Ein einziger SSE-Block. Kein Task-Lifecycle, keine Artifacts. Gesamtlatenz: Cognigy Flow-Zeit + Normalizer (typisch 1–4s).</div>
       <div class="code-block">
-<span class="e">data</span>: { <span class="e">kind</span>: <span class="s">"message"</span>, <span class="e">parts</span>: [{ <span class="e">kind</span>: <span class="s">"text"</span>, <span class="e">text</span>: <span class="s">"Rechnung #8821..."</span> }] }<br>
-<span class="e">data</span>: { <span class="e">kind</span>: <span class="s">"status"</span>, <span class="e">status</span>: { <span class="e">state</span>: <span class="s">"completed"</span> }, <span class="e">final</span>: <span class="k">true</span> }
+<span class="e">data</span>: { <span class="e">kind</span>: <span class="s">"message"</span>, <span class="e">parts</span>: [{ <span class="e">kind</span>: <span class="s">"text"</span>, <span class="e">text</span>: <span class="s">"Rechnung #8821..."</span> }] }
       </div>
     </div>
   </div>
@@ -364,7 +379,7 @@ html.light #theme-toggle { background:#fff; box-shadow:0 2px 12px rgba(0,0,0,.1)
 </div>
 </div>
 
-<!-- ═══════════════════════════════════════ PANEL: SOCKET FLOW ═══ -->
+<!-- ═══════════ SOCKET FLOW ═══════════ -->
 <div class="panel" id="flow-socket">
 <div class="flow">
 
@@ -373,10 +388,9 @@ html.light #theme-toggle { background:#fff; box-shadow:0 2px 12px rgba(0,0,0,.1)
     <div class="step-body">
       <div class="step-actor sa-blue">A2A Client → Gateway</div>
       <div class="step-title">A2A Request — POST /agents/booking-agent/a2a</div>
-      <div class="step-desc">Consumer sendet Anfrage. Gateway erkennt via Registry: endpointType = "SOCKET" → Socket Adapter + Connection Pool werden aktiviert.</div>
+      <div class="step-desc">Gateway erkennt: endpointType = "SOCKET" → Socket Adapter + Connection Pool werden aktiviert.</div>
       <div class="code-block">
-{ <span class="e">contextId</span>: <span class="s">"ctx-abc123"</span>, <span class="e">message</span>: { <span class="e">parts</span>: [{ <span class="e">kind</span>: <span class="s">"text"</span>,<br>
-&nbsp;&nbsp;<span class="e">text</span>: <span class="s">"Buche Flug nach Berlin am 15.03"</span> }] } }
+{ <span class="e">contextId</span>: <span class="s">"ctx-abc123"</span>, <span class="e">message</span>: { <span class="e">parts</span>: [{ <span class="e">kind</span>: <span class="s">"text"</span>, <span class="e">text</span>: <span class="s">"Buche Flug nach Berlin am 15.03"</span> }] } }
       </div>
     </div>
   </div>
@@ -384,20 +398,11 @@ html.light #theme-toggle { background:#fff; box-shadow:0 2px 12px rgba(0,0,0,.1)
   <div class="step">
     <div class="step-num-col"><div class="step-num sn-amber">2</div><div class="step-line sl-amber"></div></div>
     <div class="step-body">
-      <div class="step-actor sa-amber">Gateway — Connection Pool</div>
-      <div class="step-title">Pool Lookup: Existiert Connection für "booking-agent"?</div>
-      <div class="step-desc">
-        Der <strong style="color:#fbbf24">SocketConnectionPool</strong> prüft ob eine aktive Verbindung für diesen Agent-Endpoint existiert.
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px">
-        <div style="background:#060f09;border:1px solid #1a3d20;border-radius:6px;padding:10px;font-size:9.5px">
-          <div style="color:var(--green);font-weight:700;margin-bottom:4px">✓ Connection EXISTS (IDLE/ACTIVE)</div>
-          <div style="color:var(--dim)">→ Direkt wiederverwenden<br>→ <code>sendMessage()</code> über bestehende WS<br>→ sessionId = "ctx-abc123" als Key</div>
-        </div>
-        <div style="background:#100800;border:1px solid #3d2000;border-radius:6px;padding:10px;font-size:9.5px">
-          <div style="color:var(--orange);font-weight:700;margin-bottom:4px">✗ Connection NOT FOUND</div>
-          <div style="color:var(--dim)">→ Neuen SocketClient erstellen<br>→ <code>client.connect()</code> aufrufen<br>→ Timeout: 5s · dann in Pool eintragen</div>
-        </div>
+      <div class="step-actor sa-amber">CognigyAgentExecutor</div>
+      <div class="step-title">Task geöffnet → TaskStatusUpdateEvent { state:'working' }</div>
+      <div class="step-desc">Bevor der Adapter aufgerufen wird, sendet der Executor sofort das erste Event: Task ist gestartet. Der Client kann nun auf Streaming-Events warten.</div>
+      <div class="code-block">
+<span class="e">data</span>: { <span class="e">kind</span>: <span class="s">"status-update"</span>, <span class="e">status</span>: { <span class="e">state</span>: <span class="s">"working"</span> }, <span class="e">final</span>: <span class="k">false</span> }
       </div>
     </div>
   </div>
@@ -405,111 +410,69 @@ html.light #theme-toggle { background:#fff; box-shadow:0 2px 12px rgba(0,0,0,.1)
   <div class="step">
     <div class="step-num-col"><div class="step-num sn-amber">3</div><div class="step-line sl-amber"></div></div>
     <div class="step-body">
-      <div class="step-actor sa-amber">Socket Adapter — Connection Setup (wenn neu)</div>
-      <div class="step-title">SocketClient.connect() → Cognigy Socket.IO Endpoint</div>
-      <div class="step-desc">Nur beim ersten Request für diesen Agent: Verbindungsaufbau via @cognigy/socket-client. Connection wird nach Erfolg in den Pool eingetragen und bleibt persistent.</div>
-      <div class="code-block">
-<span class="k">const</span> client = <span class="k">new</span> <span class="e">SocketClient</span>(endpointUrl, urlToken, {<br>
-&nbsp;&nbsp;<span class="e">userId</span>: <span class="s">"a2a-gateway"</span>,<br>
-&nbsp;&nbsp;<span class="e">sessionId</span>: <span class="s">"ctx-abc123"</span>,  <span class="c">// = A2A contextId</span><br>
-&nbsp;&nbsp;<span class="e">forceWebsockets</span>: <span class="k">true</span>,   <span class="c">// kein HTTP Polling Fallback</span><br>
-&nbsp;&nbsp;<span class="e">reconnection</span>: <span class="k">false</span>       <span class="c">// eigenes Reconnect-Management</span><br>
-})<br>
-<span class="k">await</span> client.<span class="e">connect</span>()  <span class="c">// Timeout: 5s</span><br>
-pool.<span class="e">register</span>(<span class="s">"booking-agent"</span>, client)  <span class="c">// in Pool eintragen</span>
-      </div>
+      <div class="step-actor sa-amber">Connection Pool + Socket Adapter</div>
+      <div class="step-title">Pool Lookup → bestehende WS wiederverwenden oder neue aufbauen</div>
+      <div class="step-desc">SocketAdapter unwrapped automatisch den <code>_cognigy._default</code> Envelope. Media-Felder (<code>_image</code>, <code>_audio</code>, <code>_video</code>) werden als separate Outputs erkannt.</div>
     </div>
   </div>
 
   <div class="step">
-    <div class="step-num-col"><div class="step-num sn-orange">4</div><div class="step-line sl-orange"></div></div>
-    <div class="step-body">
-      <div class="step-actor sa-orange">Socket Adapter → Cognigy</div>
-      <div class="step-title">Message senden + Event-Listener registrieren</div>
-      <div class="step-desc">Message wird über die bestehende WS-Verbindung gesendet. Event-Listener werden sessionId-spezifisch registriert, damit parallele Sessions sich nicht gegenseitig stören.</div>
-      <div class="code-block">
-client.<span class="e">on</span>(<span class="s">"output"</span>, (output) => {<br>
-&nbsp;&nbsp;<span class="k">if</span> (output.sessionId !== <span class="s">"ctx-abc123"</span>) <span class="k">return</span>  <span class="c">// Session-Filter!</span><br>
-&nbsp;&nbsp;normalizer.<span class="e">handle</span>(output, eventBus)  <span class="c">// → SSE an Client</span><br>
-})<br>
-client.<span class="e">on</span>(<span class="s">"finalPing"</span>, (ping) => {<br>
-&nbsp;&nbsp;<span class="k">if</span> (ping.sessionId !== <span class="s">"ctx-abc123"</span>) <span class="k">return</span><br>
-&nbsp;&nbsp;eventBus.<span class="e">finished</span>()  <span class="c">// → Task completed</span><br>
-})<br>
-client.<span class="e">sendMessage</span>(<span class="s">"Buche Flug nach Berlin am 15.03"</span>)
-      </div>
-    </div>
-  </div>
-
-  <div class="step">
-    <div class="step-num-col"><div class="step-num sn-purple">5</div><div class="step-line sl-purple"></div></div>
+    <div class="step-num-col"><div class="step-num sn-purple">4</div><div class="step-line sl-purple"></div></div>
     <div class="step-body">
       <div class="step-actor sa-purple">Cognigy Agentic Flow</div>
-      <div class="step-title">LLM Reasoning + Tool Calls → mehrere emit("output")</div>
-      <div class="step-desc">Der Agentic Flow läuft asynchron. Er kann Sekunden bis Minuten dauern. Mehrere output-Events werden live emittiert — jedes sofort an den A2A Client weitergeleitet.</div>
+      <div class="step-title">LLM Reasoning → mehrere emit("output")</div>
+      <div class="step-desc">Der Agentic Flow emittiert mehrfach: erst plain text, dann ein QuickReplies-Output. Jedes <code>on("output")</code> triggert sofort <code>onOutput(output, i)</code> → <code>normalizeOutput()</code> → Event-Routing.</div>
       <div class="code-block">
-<span class="c">// Cognigy emittiert mehrfach:</span><br>
 emit(<span class="s">"output"</span>) → { <span class="e">text</span>: <span class="s">"Ich suche verfügbare Flüge..."</span> }<br>
-<span class="c">// LLM ruft Flight-Search-Tool auf...</span><br>
-emit(<span class="s">"output"</span>) → { <span class="e">text</span>: <span class="k">null</span>, <span class="e">data</span>: { <span class="e">_cognigy</span>: { <span class="e">_default</span>: {<br>
-&nbsp;&nbsp;<span class="e">_quickReplies</span>: { <span class="e">quickReplies</span>: [<br>
-&nbsp;&nbsp;&nbsp;&nbsp;{ <span class="e">title</span>: <span class="s">"LH123 · 09:00 · 320€"</span>, <span class="e">payload</span>: <span class="s">"LH123"</span> },<br>
-&nbsp;&nbsp;&nbsp;&nbsp;{ <span class="e">title</span>: <span class="s">"LH456 · 14:30 · 280€"</span>, <span class="e">payload</span>: <span class="s">"LH456"</span> }<br>
-&nbsp;&nbsp;]}}}}}<br>
+emit(<span class="s">"output"</span>) → { <span class="e">text</span>: <span class="k">null</span>, <span class="e">data</span>: { <span class="e">_cognigy</span>: { <span class="e">_default</span>: { <span class="e">_quickReplies</span>: { <span class="e">text</span>: <span class="s">"Bitte wählen"</span>, <span class="e">quickReplies</span>: [...] } } } } }<br>
 emit(<span class="s">"finalPing"</span>) → Flow abgeschlossen
       </div>
     </div>
   </div>
 
   <div class="step">
-    <div class="step-num-col"><div class="step-num sn-cyan">6</div><div class="step-line sl-cyan"></div></div>
+    <div class="step-num-col"><div class="step-num sn-cyan">5</div><div class="step-line sl-cyan"></div></div>
     <div class="step-body">
-      <div class="step-actor sa-cyan">Output Normalizer</div>
-      <div class="step-title">text=null erkannt → TextPart aus _quickReplies generiert</div>
-      <div class="step-desc">Output #1: text vorhanden → direkt. Output #2: text=null, _quickReplies erkannt → TextPart aus Titeln generiert + DataPart mit strukturierten Optionen.</div>
+      <div class="step-actor sa-cyan">OutputNormalizer → Event-Router</div>
+      <div class="step-title">normalizeOutput() → NormalizedOutput.kind → korrektes A2A Event</div>
+      <div class="step-desc">Output #1 → <code>StatusMessageOutput</code> → <code>TaskStatusUpdateEvent</code> mit message. Output #2 → <code>StatusMessageOutput</code> (Quick Replies) → <code>TaskStatusUpdateEvent</code> mit message {TextPart + DataPart}.</div>
       <div class="code-block">
-<span class="c">// Output #1: text direkt</span><br>
-[{ <span class="e">kind</span>: <span class="s">"text"</span>, <span class="e">text</span>: <span class="s">"Ich suche verfügbare Flüge..."</span> }]<br><br>
-<span class="c">// Output #2: Generiert aus _quickReplies Titeln</span><br>
-[<br>
-&nbsp;&nbsp;{ <span class="e">kind</span>: <span class="s">"text"</span>, <span class="e">text</span>: <span class="s">"Bitte wähle: LH123 · 09:00 · 320€, LH456 · 14:30 · 280€"</span> },<br>
-&nbsp;&nbsp;{ <span class="e">kind</span>: <span class="s">"data"</span>, <span class="e">data</span>: { <span class="e">type</span>: <span class="s">"quickReplies"</span>, <span class="e">options</span>: [<br>
-&nbsp;&nbsp;&nbsp;&nbsp;{ <span class="e">label</span>: <span class="s">"LH123 · 09:00 · 320€"</span>, <span class="e">value</span>: <span class="s">"LH123"</span> },<br>
-&nbsp;&nbsp;&nbsp;&nbsp;{ <span class="e">label</span>: <span class="s">"LH456 · 14:30 · 280€"</span>, <span class="e">value</span>: <span class="s">"LH456"</span> }<br>
-&nbsp;&nbsp;]}}<br>
-]
+<span class="c">// Output #1 → kind:'status-message'</span><br>
+→ TaskStatusUpdateEvent { <span class="e">state</span>: <span class="s">'working'</span>, <span class="e">message</span>: { <span class="e">parts</span>: [{ <span class="e">kind</span>: <span class="s">"text"</span>, <span class="e">text</span>: <span class="s">"Ich suche..."</span> }] } }<br><br>
+<span class="c">// Output #2 → kind:'status-message' (QuickReplies)</span><br>
+→ TaskStatusUpdateEvent { <span class="e">state</span>: <span class="s">'working'</span>, <span class="e">message</span>: { <span class="e">parts</span>: [<br>
+&nbsp;&nbsp;{ <span class="e">kind</span>: <span class="s">"text"</span>, <span class="e">text</span>: <span class="s">"Bitte wählen\n- LH123 · 09:00 · 320€\n- LH456 · 14:30 · 280€"</span> },<br>
+&nbsp;&nbsp;{ <span class="e">kind</span>: <span class="s">"data"</span>, <span class="e">data</span>: { <span class="e">type</span>: <span class="s">"quick_replies"</span>, <span class="e">payload</span>: { <span class="e">quickReplies</span>: [...] } } }<br>
+]}}<br><br>
+<span class="c">// Wenn stattdessen ein Image-Output käme → kind:'artifact'</span><br>
+→ TaskArtifactUpdateEvent { <span class="e">artifact</span>: { <span class="e">name</span>: <span class="s">"photo.jpg"</span>, <span class="e">parts</span>: [<br>
+&nbsp;&nbsp;{ <span class="e">kind</span>: <span class="s">"file"</span>, <span class="e">file</span>: { <span class="e">uri</span>: <span class="s">"https://..."</span>, <span class="e">mimeType</span>: <span class="s">"image/jpeg"</span> } },<br>
+&nbsp;&nbsp;{ <span class="e">kind</span>: <span class="s">"text"</span>, <span class="e">text</span>: <span class="s">"[Image: https://...]"</span> }<br>
+]}}
       </div>
     </div>
   </div>
 
   <div class="step">
-    <div class="step-num-col"><div class="step-num sn-green">7</div><div class="step-line sl-green"></div></div>
+    <div class="step-num-col"><div class="step-num sn-green">6</div><div class="step-line sl-green"></div></div>
     <div class="step-body">
       <div class="step-actor sa-green">Gateway → A2A Client (SSE Stream)</div>
-      <div class="step-title">Live-Streaming: 2 Messages + completed</div>
-      <div class="step-desc">Jeder Cognigy-Output wird sofort als SSE-Event weitergeleitet — kein Warten auf finalPing. Der LLM-Orchestrator verarbeitet sie live.</div>
+      <div class="step-title">Live-Streaming: TaskStatusUpdateEvents → completed</div>
+      <div class="step-desc">Der vollständige SSE-Stream. Jeder Cognigy-Output erscheint sofort beim Client. Nach dem finalPing: <code>completed</code>-Event schließt den Stream.</div>
       <div class="code-block">
-<span class="e">data</span>: { <span class="e">kind</span>: <span class="s">"message"</span>, <span class="e">parts</span>: [{ <span class="e">kind</span>: <span class="s">"text"</span>, <span class="e">text</span>: <span class="s">"Ich suche..."</span> }] }<br><br>
-<span class="e">data</span>: { <span class="e">kind</span>: <span class="s">"message"</span>, <span class="e">parts</span>: [<br>
-&nbsp;&nbsp;{ <span class="e">kind</span>: <span class="s">"text"</span>, <span class="e">text</span>: <span class="s">"Bitte wähle: LH123 · 09:00 · 320€, LH456 · 14:30 · 280€"</span> },<br>
-&nbsp;&nbsp;{ <span class="e">kind</span>: <span class="s">"data"</span>, <span class="e">data</span>: { <span class="e">type</span>: <span class="s">"quickReplies"</span>, <span class="e">options</span>: [...] }}<br>
-]}<br><br>
-<span class="e">data</span>: { <span class="e">kind</span>: <span class="s">"status"</span>, <span class="e">status</span>: { <span class="e">state</span>: <span class="s">"completed"</span> }, <span class="e">final</span>: <span class="k">true</span> }
+<span class="c">// #1 Task geöffnet (kein message)</span><br>
+<span class="e">data</span>: { <span class="e">kind</span>: <span class="s">"status-update"</span>, <span class="e">status</span>: { <span class="e">state</span>: <span class="s">"working"</span> }, <span class="e">final</span>: <span class="k">false</span> }<br><br>
+<span class="c">// #2 Erstes Cognigy-Output (plain text)</span><br>
+<span class="e">data</span>: { <span class="e">kind</span>: <span class="s">"status-update"</span>, <span class="e">status</span>: { <span class="e">state</span>: <span class="s">"working"</span>, <span class="e">message</span>: { <span class="e">parts</span>: [{ <span class="e">kind</span>: <span class="s">"text"</span>, <span class="e">text</span>: <span class="s">"Ich suche..."</span> }] } }, <span class="e">final</span>: <span class="k">false</span> }<br><br>
+<span class="c">// #3 Zweites Cognigy-Output (QuickReplies)</span><br>
+<span class="e">data</span>: { <span class="e">kind</span>: <span class="s">"status-update"</span>, <span class="e">status</span>: { <span class="e">state</span>: <span class="s">"working"</span>, <span class="e">message</span>: { <span class="e">parts</span>: [TextPart, DataPart] } }, <span class="e">final</span>: <span class="k">false</span> }<br><br>
+<span class="c">// #4 finalPing → Task abgeschlossen</span><br>
+<span class="e">data</span>: { <span class="e">kind</span>: <span class="s">"status-update"</span>, <span class="e">status</span>: { <span class="e">state</span>: <span class="s">"completed"</span> }, <span class="e">final</span>: <span class="k">true</span> }
       </div>
-    </div>
-  </div>
-
-  <div class="step">
-    <div class="step-num-col"><div class="step-num sn-amber">8</div><div class="step-line sl-amber"></div></div>
-    <div class="step-body">
-      <div class="step-actor sa-amber">Connection Pool — Post-Request</div>
-      <div class="step-title">Connection bleibt IDLE im Pool — kein Disconnect</div>
-      <div class="step-desc">Nach dem finalPing: Session-Listener werden entfernt. Die WS-Verbindung zum booking-agent-Endpoint bleibt aber offen und geht in den IDLE-State. Der nächste Request für booking-agent nutzt sie sofort wieder — ohne Verbindungsaufbau.</div>
-      <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
-        <span class="pill p-pool">WS Connection: IDLE</span>
-        <span class="pill p-out">Session ctx-abc123: closed</span>
-        <span class="pill p-warn">Idle-Timeout: 5min → dann disconnect</span>
-        <span class="pill p-pool">Keepalive Ping: alle 30s</span>
+      <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px">
+        <span class="pill p-status">conversational → TaskStatusUpdateEvent</span>
+        <span class="pill p-art">image/audio/video → TaskArtifactUpdateEvent</span>
+        <span class="pill p-out">immer: TextPart garantiert</span>
       </div>
     </div>
   </div>
@@ -517,12 +480,147 @@ emit(<span class="s">"finalPing"</span>) → Flow abgeschlossen
 </div>
 </div>
 
-<!-- ═══════════════════════════════════════ PANEL: SOCKET MGMT ═══ -->
+<!-- ═══════════ NORMALIZATION PANEL ═══════════ -->
+<div class="panel" id="normalization">
+
+  <div class="norm-grid">
+
+    <!-- STATUS MESSAGE OUTPUT -->
+    <div class="norm-card">
+      <div class="norm-card-title" style="color:var(--green)">💬 StatusMessageOutput</div>
+      <div class="kind-tag kind-status">kind: 'status-message'</div>
+      <div class="norm-card-body" style="margin-bottom:10px">Alle konversationellen / UI Outputs. Landen in <code>TaskStatusUpdateEvent.status.message.parts[]</code>. Immer mit TextPart — LLM-Agents können jeden Typ lesen.</div>
+      <table class="norm-table">
+        <tr><th>Cognigy Type</th><th>TextPart Inhalt</th><th>DataPart type</th></tr>
+        <tr>
+          <td>plain text</td>
+          <td><span class="t">output.text verbatim</span></td>
+          <td style="color:var(--muted)">—</td>
+        </tr>
+        <tr>
+          <td>_quickReplies</td>
+          <td><span class="t">label + "- Titel A\n- Titel B ![image](url)"</span></td>
+          <td><span class="d">quick_replies</span></td>
+        </tr>
+        <tr>
+          <td>_buttons</td>
+          <td><span class="t">label + "- Button 1" / "- Button 1: https://url" (web_url)</span></td>
+          <td><span class="d">buttons</span></td>
+        </tr>
+        <tr>
+          <td>_list</td>
+          <td><span class="t">header + "- Titel: Subtitle ![image](url)"</span></td>
+          <td><span class="d">list</span></td>
+        </tr>
+        <tr>
+          <td>_gallery</td>
+          <td><span class="t">output.text oder "Here are some options:" + "- Titel: Subtitle ![image](url)"</span></td>
+          <td><span class="d">carousel</span></td>
+        </tr>
+        <tr>
+          <td>_adaptiveCard</td>
+          <td><span class="t">TextBlocks + FactSet + Inputs + Actions (rekursiv)</span></td>
+          <td><span class="d">AdaptiveCard</span></td>
+        </tr>
+        <tr>
+          <td>custom data</td>
+          <td><span class="t">_fallbackText (wenn vorhanden)</span></td>
+          <td><span class="d">cognigy/data</span></td>
+        </tr>
+      </table>
+      <div style="margin-top:10px;font-size:9px;color:var(--muted)">DataPart.data = { type: "quick_replies", payload: { ...original Cognigy payload verbatim... } }<br>_cognigy und _fallbackText werden vor dem DataPart gestripped.</div>
+    </div>
+
+    <!-- ARTIFACT OUTPUT -->
+    <div class="norm-card">
+      <div class="norm-card-title" style="color:var(--orange)">📁 ArtifactOutput</div>
+      <div class="kind-tag kind-artifact">kind: 'artifact'</div>
+      <div class="norm-card-body" style="margin-bottom:10px">Binary Media Outputs. Landen in <code>TaskArtifactUpdateEvent.artifact</code>. FilePart enthält URI + MIME-Typ. TextPart ist Fallback für LLM-Agents.</div>
+      <table class="norm-table">
+        <tr><th>Cognigy Type</th><th>FilePart</th><th>TextPart</th></tr>
+        <tr>
+          <td>_image</td>
+          <td><span class="f">uri + mimeType: image/*</span></td>
+          <td><span class="t">[Image: url]</span></td>
+        </tr>
+        <tr>
+          <td>_audio</td>
+          <td><span class="f">uri + mimeType: audio/*</span></td>
+          <td><span class="t">[Audio: url]</span></td>
+        </tr>
+        <tr>
+          <td>_video</td>
+          <td><span class="f">uri + mimeType: video/*</span></td>
+          <td><span class="t">[Video: url]</span></td>
+        </tr>
+      </table>
+
+      <div style="margin-top:14px;font-size:9.5px;color:var(--dim);font-weight:700;margin-bottom:6px">MIME-Typ Inferenz — aus URL-Extension:</div>
+      <table class="mime-table">
+        <tr><td>image</td><td>jpg jpeg png gif webp svg bmp ico</td><td style="color:var(--dim);font-size:9px">→ image/jpeg, image/png ...</td></tr>
+        <tr><td>audio</td><td>mp3 ogg wav m4a aac flac webm</td><td style="color:var(--dim);font-size:9px">→ audio/mpeg, audio/ogg ...</td></tr>
+        <tr><td>video</td><td>mp4 webm ogg avi mov mkv m4v</td><td style="color:var(--dim);font-size:9px">→ video/mp4, video/webm ...</td></tr>
+      </table>
+      <div style="margin-top:8px;font-size:9px;color:var(--muted)">Query-String wird vor Extension-Erkennung gestripped. Unbekannte Extension → Fallback (image/jpeg, audio/mpeg, video/mp4).</div>
+    </div>
+
+  </div>
+
+  <!-- ADAPTIVE CARD EXTRACTION -->
+  <div class="norm-card" style="margin-bottom:16px">
+    <div class="norm-card-title" style="color:var(--purple)">🃏 Adaptive Card — Vollständige Rekursive Extraktion</div>
+    <div class="norm-card-body" style="margin-bottom:10px">
+      Der Adaptive Card Renderer durchläuft <strong style="color:#fff">alle bekannten Element-Typen rekursiv</strong> (ColumnSet → columns → items, Container → items). Das Resultat: ein einziger lesbarer Text-Block, den ein LLM-Agent ohne Kenntnis des AdaptiveCard-Schemas interpretieren kann — inklusive angezeigter Inhalte (TextBlocks) UND aller User-Interaktionen (Inputs, Actions).
+    </div>
+    <div class="card-tree">
+      <div class="ct-row"><span class="ct-type">TextBlock</span><span class="ct-desc">→ .text Wert direkt übernommen</span></div>
+      <div class="ct-row"><span class="ct-type">FactSet</span><span class="ct-desc">→ "Titel: Wert" pro fact (beide Felder vorhanden)</span></div>
+      <div class="ct-row"><span class="ct-type">Input.Text / Date / Number / Time</span><span class="ct-desc">→ label (placeholder) als kombinierter Hinweis</span></div>
+      <div class="ct-row"><span class="ct-type">Input.ChoiceSet</span><span class="ct-desc">→ label + "- choice.title" pro Auswahlmöglichkeit</span></div>
+      <div class="ct-row"><span class="ct-type">Input.Toggle</span><span class="ct-desc">→ .title Text</span></div>
+      <div class="ct-row"><span class="ct-type">ColumnSet</span><span class="ct-desc">→ rekursiert in columns[].items → extractCardElement()</span></div>
+      <div class="ct-row"><span class="ct-type">Container</span><span class="ct-desc">→ rekursiert in .items → extractCardElement()</span></div>
+      <div class="ct-row"><span class="ct-type">Action.Submit / OpenUrl / ShowCard / Execute</span><span class="ct-desc">→ "[Action: titel]" — auch in card.actions[]</span></div>
+      <div class="ct-row"><span class="ct-type">Image / Media / sonstige</span><span class="ct-desc">→ übersprungen (kein Text zu extrahieren)</span></div>
+    </div>
+    <div style="margin-top:10px;font-size:9px;color:var(--muted)">
+      Unterstützt sowohl nested-Format <code>payload.adaptiveCard.body[]</code> als auch flat-Format <code>payload.body[]</code>.
+      Adapter-Aktionen in <code>card.actions[]</code> werden separat nach dem body verarbeitet.
+    </div>
+  </div>
+
+  <!-- EXECUTOR ROUTING LOGIC -->
+  <div class="norm-card">
+    <div class="norm-card-title" style="color:var(--cyan)">🔀 CognigyAgentExecutor — Event-Routing-Logik</div>
+    <div class="norm-card-body" style="margin-bottom:10px">
+      Der Executor konsumiert den <code>NormalizedOutput</code> Discriminated Union und routet per <code>.kind</code> Field. REST-Pfad und Socket-Pfad verhalten sich unterschiedlich.
+    </div>
+    <div class="code-block">
+<span class="c">// SOCKET-Pfad: onOutput callback → pro Cognigy-Output</span><br>
+<span class="k">const</span> normalized = <span class="e">normalizeOutput</span>(output, index);<br><br>
+<span class="k">if</span> (normalized.kind === <span class="s">'status-message'</span>) {<br>
+&nbsp;&nbsp;<span class="c">// → TaskStatusUpdateEvent { state:'working', message:{ parts }, final:false }</span><br>
+&nbsp;&nbsp;eventBus.<span class="e">publish</span>({ <span class="e">kind</span>: <span class="s">'status-update'</span>, <span class="e">status</span>: { <span class="e">state</span>: <span class="s">'working'</span>, <span class="e">message</span>: { <span class="e">parts</span>: normalized.parts } } })<br>
+}<br><br>
+<span class="k">if</span> (normalized.kind === <span class="s">'artifact'</span>) {<br>
+&nbsp;&nbsp;<span class="c">// → TaskArtifactUpdateEvent { artifact:{ name, mimeType, parts } }</span><br>
+&nbsp;&nbsp;eventBus.<span class="e">publish</span>({ <span class="e">kind</span>: <span class="s">'artifact-update'</span>, <span class="e">artifact</span>: {<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="e">name</span>: normalized.name, <span class="e">mimeType</span>: normalized.mimeType, <span class="e">parts</span>: normalized.parts<br>
+&nbsp;&nbsp;}})<br>
+}<br><br>
+<span class="c">// REST-Pfad: normalizeOutputs() → flatten → Message.parts[]</span><br>
+<span class="c">// Alle NormalizedOutput.parts werden inline in einen Part[] geflacht</span><br>
+<span class="k">const</span> parts = <span class="e">normalizeOutputs</span>(outputs) <span class="c">// returns ReadonlyArray&lt;Part&gt;</span>
+    </div>
+  </div>
+
+</div>
+
+<!-- ═══════════ SOCKET MANAGEMENT ═══════════ -->
 <div class="panel" id="socket-mgmt">
 
   <div class="sm-grid">
 
-    <!-- STATE MACHINE -->
     <div class="sm-card">
       <div class="sm-card-title" style="color:var(--amber)">⚡ Connection State Machine</div>
       <div class="sm-card-body">Eine Connection pro Agent-Endpoint durchläuft diese States:</div>
@@ -536,34 +634,33 @@ emit(<span class="s">"finalPing"</span>) → Flow abgeschlossen
         <div class="sm-state st-idle">
           <div class="sm-state-dot"></div>
           <div class="sm-state-name">IDLE</div>
-          <div class="sm-state-desc">Verbunden · keine aktive Session · Keepalive-Ping alle 30s · nach 5min Inaktivität → Disconnect</div>
+          <div class="sm-state-desc">Verbunden · Keepalive-Ping alle 30s · nach 5min Inaktivität → Disconnect</div>
         </div>
         <div class="sm-arrow">↓ sendMessage() aufgerufen</div>
         <div class="sm-state st-active">
           <div class="sm-state-dot"></div>
           <div class="sm-state-name">ACTIVE</div>
-          <div class="sm-state-desc">≥1 Session läuft · Outputs fließen · finalPing erwartet · mehrere Sessions parallel möglich</div>
+          <div class="sm-state-desc">≥1 Session läuft · Outputs fließen · finalPing erwartet</div>
         </div>
-        <div class="sm-arrow">↓ alle Sessions beendet (finalPing) → IDLE &nbsp;|&nbsp; on("disconnect") → RECONNECTING</div>
+        <div class="sm-arrow">↓ alle Sessions beendet → IDLE | on("disconnect") → RECONNECTING</div>
         <div class="sm-state st-reconn">
           <div class="sm-state-dot"></div>
           <div class="sm-state-name">RECONNECTING</div>
-          <div class="sm-state-desc">Exponential Backoff · 1s → 2s → 4s → 8s → 16s → 30s max · Jitter ±20% · max 5 Versuche</div>
+          <div class="sm-state-desc">Exponential Backoff: 1s → 2s → 4s → 8s → 16s → 30s · Jitter ±20% · max 6 Versuche</div>
         </div>
         <div class="sm-arrow">↓ max Versuche erreicht oder Auth-Fehler</div>
         <div class="sm-state st-dead">
           <div class="sm-state-dot"></div>
           <div class="sm-state-name">DEAD</div>
-          <div class="sm-state-desc">Aus Pool entfernt · alle laufenden Sessions erhalten Error · nächster Request erstellt neue Connection</div>
+          <div class="sm-state-desc">Aus Pool entfernt · alle Sessions erhalten Error · nächster Request → neue Connection</div>
         </div>
       </div>
     </div>
 
-    <!-- POOL + MULTIPLEXING -->
     <div class="sm-card">
       <div class="sm-card-title" style="color:var(--cyan)">↔ Session Multiplexing via Pool</div>
       <div class="sm-card-body" style="margin-bottom:10px">
-        Viele parallele A2A-Requests nutzen <strong style="color:#fff">eine einzige WS-Verbindung</strong> pro Agent-Endpoint. Isolation via <code>sessionId</code>.
+        Viele parallele A2A-Requests nutzen <strong style="color:#fff">eine WS-Verbindung</strong> pro Agent-Endpoint. Isolation via <code>sessionId</code>.
       </div>
       <div class="pool-diagram">
         <div class="pd-row">
@@ -578,13 +675,9 @@ emit(<span class="s">"finalPing"</span>) → Flow abgeschlossen
           <div class="pd-label" style="padding-left:12px">ctx-002</div>
           <div class="pd-sess pd-sess-a">↔ Läuft · Tool Call</div>
         </div>
-        <div class="pd-row">
-          <div class="pd-label" style="padding-left:12px">ctx-003</div>
-          <div class="pd-sess pd-sess-i">○ Wartet auf Reply</div>
-        </div>
         <div class="pd-row" style="margin-top:10px">
           <div class="pd-label" style="color:var(--muted);font-weight:700">billing-agent</div>
-          <div class="pd-conn pd-idle">○ IDLE · endpoint.cognigy.ai · kein Traffic</div>
+          <div class="pd-conn pd-idle">○ IDLE · kein Traffic · Keepalive</div>
         </div>
         <div class="pd-row" style="margin-top:10px">
           <div class="pd-label" style="color:var(--muted);font-weight:700">hr-agent</div>
@@ -592,72 +685,34 @@ emit(<span class="s">"finalPing"</span>) → Flow abgeschlossen
         </div>
       </div>
       <div style="margin-top:12px;font-size:9.5px;color:var(--muted);line-height:1.6">
-        <strong style="color:var(--cyan)">Output-Routing:</strong> on("output") prüft <code>output.sessionId</code> → dispatcht nur an den korrekten SSE-Stream. Andere Sessions bleiben unberührt.
+        <strong style="color:var(--cyan)">Output-Routing:</strong> on("output") prüft <code>output.sessionId</code> → dispatcht nur an den korrekten SSE-Stream.
       </div>
     </div>
 
   </div>
 
-  <!-- RECONNECT TIMELINE -->
   <div class="sm-card" style="margin-bottom:16px">
-    <div class="sm-card-title" style="color:#ff7043">🔴 Reconnect-Szenario: Was passiert bei einem Disconnect?</div>
-
+    <div class="sm-card-title" style="color:#ff7043">🔴 Reconnect-Szenario: Exponential Backoff</div>
     <div class="backoff-diagram">
-      <div class="bd-bar-group">
-        <div class="bd-bar" style="height:14px;background:linear-gradient(to top,#ef4444,#f87171)"></div>
-        <div class="bd-time">sofort</div>
-        <div class="bd-att">Attempt 1</div>
-      </div>
-      <div class="bd-bar-group">
-        <div class="bd-bar" style="height:20px;background:linear-gradient(to top,#f97316,#fb923c)"></div>
-        <div class="bd-time">+1s</div>
-        <div class="bd-att">Attempt 2</div>
-      </div>
-      <div class="bd-bar-group">
-        <div class="bd-bar" style="height:30px;background:linear-gradient(to top,#eab308,#fbbf24)"></div>
-        <div class="bd-time">+2s</div>
-        <div class="bd-att">Attempt 3</div>
-      </div>
-      <div class="bd-bar-group">
-        <div class="bd-bar" style="height:46px;background:linear-gradient(to top,#84cc16,#a3e635)"></div>
-        <div class="bd-time">+4s</div>
-        <div class="bd-att">Attempt 4</div>
-      </div>
-      <div class="bd-bar-group">
-        <div class="bd-bar" style="height:60px;background:linear-gradient(to top,#22d3ee,#67e8f9)"></div>
-        <div class="bd-time">+8s</div>
-        <div class="bd-att">Attempt 5</div>
-      </div>
-      <div style="padding-left:8px;display:flex;flex-direction:column;justify-content:flex-end;gap:4px;padding-bottom:2px">
-        <div style="font-size:9px;color:var(--dim)">+ Jitter ±20% auf jeden Wert</div>
+      <div class="bd-bar-group"><div class="bd-bar" style="height:14px;background:linear-gradient(to top,#ef4444,#f87171)"></div><div class="bd-time">sofort</div><div class="bd-att">Att 1</div></div>
+      <div class="bd-bar-group"><div class="bd-bar" style="height:20px;background:linear-gradient(to top,#f97316,#fb923c)"></div><div class="bd-time">+1s</div><div class="bd-att">Att 2</div></div>
+      <div class="bd-bar-group"><div class="bd-bar" style="height:30px;background:linear-gradient(to top,#eab308,#fbbf24)"></div><div class="bd-time">+2s</div><div class="bd-att">Att 3</div></div>
+      <div class="bd-bar-group"><div class="bd-bar" style="height:46px;background:linear-gradient(to top,#84cc16,#a3e635)"></div><div class="bd-time">+4s</div><div class="bd-att">Att 4</div></div>
+      <div class="bd-bar-group"><div class="bd-bar" style="height:60px;background:linear-gradient(to top,#22d3ee,#67e8f9)"></div><div class="bd-time">+8s</div><div class="bd-att">Att 5</div></div>
+      <div class="bd-bar-group"><div class="bd-bar" style="height:70px;background:linear-gradient(to top,#a78bfa,#c4b5fd)"></div><div class="bd-time">+16s</div><div class="bd-att">Att 6</div></div>
+      <div style="padding-left:12px;display:flex;flex-direction:column;justify-content:flex-end;gap:4px;padding-bottom:2px">
+        <div style="font-size:9px;color:var(--dim)">+ Jitter ±20%</div>
         <div style="font-size:9px;color:var(--dim)">Max Cap: 30s</div>
-        <div style="font-size:9px;color:var(--red)">Auth-Fehler → kein Retry</div>
+        <div style="font-size:9px;color:var(--red)">Auth → kein Retry</div>
       </div>
     </div>
-
     <div class="timeline" style="margin-top:16px">
       <div class="tl-item">
         <div class="tl-time">T+0ms</div>
         <div class="tl-dot" style="background:var(--red)"></div>
         <div class="tl-body">
           <div class="tl-event">on("disconnect") gefeuert</div>
-          <div class="tl-detail">Connection-State → RECONNECTING · laufende Sessions merken sich ausstehende Nachrichten · SSE-Stream bleibt offen (Client wartet)</div>
-        </div>
-      </div>
-      <div class="tl-item">
-        <div class="tl-time">T+1000ms</div>
-        <div class="tl-dot" style="background:var(--orange)"></div>
-        <div class="tl-body">
-          <div class="tl-event">Reconnect Attempt #1 — connect()</div>
-          <div class="tl-detail">Neuer SocketClient für diesen Endpoint · wenn erfolgreich → IDLE, pending Messages re-sent · wenn Fehler → wait 2s</div>
-        </div>
-      </div>
-      <div class="tl-item">
-        <div class="tl-time">T+3000ms</div>
-        <div class="tl-dot" style="background:var(--amber)"></div>
-        <div class="tl-body">
-          <div class="tl-event">Reconnect Attempt #2 — connect()</div>
-          <div class="tl-detail">Exponential Backoff · 2s Wartezeit · + ~400ms Jitter · Client-SSE-Stream noch offen</div>
+          <div class="tl-detail">Connection-State → RECONNECTING · SSE-Streams bleiben offen · laufende Sessions merken sich ausstehende Nachrichten</div>
         </div>
       </div>
       <div class="tl-item">
@@ -671,7 +726,6 @@ emit(<span class="s">"finalPing"</span>) → Flow abgeschlossen
     </div>
   </div>
 
-  <!-- KEY RULES -->
   <div class="sm-card">
     <div class="sm-card-title" style="color:var(--green)">✓ Kritische Regeln — Connection Management</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:10px">
@@ -681,8 +735,7 @@ emit(<span class="s">"finalPing"</span>) → Flow abgeschlossen
           ✓ <code>forceWebsockets: true</code> — kein HTTP-Polling Fallback<br>
           ✓ Session-Filter bei jedem on("output")<br>
           ✓ Connection im Pool nach connect() registrieren<br>
-          ✓ Keepalive-Ping um IDLE-Timeout zu vermeiden<br>
-          ✓ Auth-Fehler sofort als DEAD markieren (kein Retry)
+          ✓ Auth-Fehler sofort als DEAD markieren
         </div>
       </div>
       <div>
@@ -690,9 +743,8 @@ emit(<span class="s">"finalPing"</span>) → Flow abgeschlossen
         <div style="color:var(--dim);line-height:1.7">
           ✗ Neue Connection pro Request erstellen<br>
           ✗ SocketClient intern reconnecten lassen (<code>reconnection: false</code>)<br>
-          ✗ ohne Session-Filter auf "output" hören<br>
-          ✗ Connection nach finalPing disconnecten<br>
-          ✗ Auth-Token im Log ausgeben
+          ✗ Ohne Session-Filter auf "output" hören<br>
+          ✗ Connection nach finalPing disconnecten
         </div>
       </div>
     </div>
@@ -700,12 +752,104 @@ emit(<span class="s">"finalPing"</span>) → Flow abgeschlossen
 
 </div>
 
+
+<!-- WEBCHAT UI PANEL -->
+<div class="panel" id="webchat-ui">
+<div class="flow">
+
+  <div class="step">
+    <div class="step-num-col"><div class="step-num sn-blue">1</div><div class="step-line sl-blue"></div></div>
+    <div class="step-card">
+      <div class="sc-header"><span class="tag" style="background:#0f1f35;color:var(--blue)">a2aClient.ts � streamMessage()</span><span class="sc-title">SSE-Stream �ffnen</span></div>
+      <div class="sc-body">
+        <div class="sc-detail">POST /agents/:id/ mit Accept: text/event-stream ? fetch() + ReadableStream Reader. JSON-RPC Envelope wird unwrapped: <code>envelope.result</code> ? A2A Event.</div>
+        <div class="sc-code">fetch(agentUrl, { method:'POST', headers:{ Accept:'text/event-stream' } })</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num-col"><div class="step-num" style="background:#0f2a1f;border-color:#1a4a30;color:var(--green)">2</div><div class="step-line" style="background:linear-gradient(var(--green),var(--cyan))"></div></div>
+    <div class="step-card">
+      <div class="sc-header"><span class="tag" style="background:#041a10;color:var(--green)">dispatchSseEvent()</span><span class="sc-title">Event-Typ erkennen &amp; dispatchen</span></div>
+      <div class="sc-body">
+        <div class="sc-detail">Drei Event-Typen werden verarbeitet:</div>
+        <table class="norm-table" style="margin-top:8px">
+          <tr><th>kind</th><th>Handler</th><th>Aktion</th></tr>
+          <tr>
+            <td><code>status-update</code></td>
+            <td>state=working</td>
+            <td>Liest <code>status.message.parts[]</code> ? <code>onPart(parts)</code> <span style="color:var(--green)">[FIX v3.6]</span></td>
+          </tr>
+          <tr>
+            <td><code>artifact-update</code></td>
+            <td>artifact.parts</td>
+            <td><code>onPart(parts)</code></td>
+          </tr>
+          <tr>
+            <td><code>message</code></td>
+            <td>parts</td>
+            <td><code>onPart(parts)</code></td>
+          </tr>
+        </table>
+        <div class="sc-detail" style="margin-top:8px;color:var(--red)">Bug vor v3.6: status-update rief nur onWorking() � message.parts wurden verworfen. Alle Socket-Inhalte blieben unsichtbar.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num-col"><div class="step-num" style="background:#0f1a2a;border-color:#1a3d4a;color:var(--cyan)">3</div><div class="step-line" style="background:linear-gradient(var(--cyan),var(--purple))"></div></div>
+    <div class="step-card">
+      <div class="sc-header"><span class="tag" style="background:#041520;color:var(--cyan)">useChat.ts � appendParts()</span><span class="sc-title">Parts in ChatMessage mergen</span></div>
+      <div class="sc-body">
+        <div class="sc-detail">Jeder <code>onPart(parts)</code>-Call merged neue Parts in die laufende ChatMessage. TextParts werden zu <code>displayText</code> konkateniert. DataParts bleiben in <code>message.parts[]</code> f�r zuk�nftige Rich-UI-Renderer.</div>
+        <div class="sc-code">merged = [...m.parts, ...newParts]
+displayText = merged.filter(p =&gt; p.kind==='text').map(p =&gt; p.text).join('\n')</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num-col"><div class="step-num" style="background:#1a0f2a;border-color:#3a1d5a;color:var(--purple)">4</div><div class="step-line" style="background:linear-gradient(var(--purple),var(--orange))"></div></div>
+    <div class="step-card">
+      <div class="sc-header"><span class="tag" style="background:#1a0c1f;color:var(--purple)">MessageBubble.tsx � react-markdown</span><span class="sc-title">Markdown-Rendering</span></div>
+      <div class="sc-body">
+        <div class="sc-detail">Der <code>displayText</code> wird durch <code>react-markdown</code> gerendert. Custom components �berschreiben img, a, p und li:</div>
+        <table class="norm-table" style="margin-top:8px">
+          <tr><th>Markdown-Syntax</th><th>Gerendert als</th></tr>
+          <tr><td><code>![image](url)</code></td><td>Inline-Bild, max 260px, lazy-loaded, rounded corners</td></tr>
+          <tr><td><code>[text](url)</code></td><td>Klickbarer Link, target=_blank</td></tr>
+          <tr><td><code>- Item</code></td><td>Bullet list, styled</td></tr>
+          <tr><td><code>**bold**</code></td><td>Font-weight 600</td></tr>
+          <tr><td><code>`code`</code></td><td>Inline code block</td></tr>
+        </table>
+        <div class="sc-detail" style="margin-top:8px">Typewriter-Animation (useTypewriter) l�uft w�hrend streaming � react-markdown re-rendert pro Zeichen. Bild-Fallback: bei load-error wird URL als Text gezeigt.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num-col"><div class="step-num" style="background:#1a0e00;border-color:#4a2800;color:var(--orange)">5</div></div>
+    <div class="step-card">
+      <div class="sc-header"><span class="tag" style="background:#1a0800;color:var(--orange)">Stream end</span><span class="sc-title">onDone() ? Status done</span></div>
+      <div class="sc-body">
+        <div class="sc-detail">Wenn der ReadableStream endet (final:true oder Connection closed) wird <code>onDone(contextId)</code> aufgerufen. Die ChatMessage wechselt von status:'streaming' zu status:'done'. Typewriter-Animation l�uft noch bis zum letzten Zeichen durch.</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</div>
+
 <script>
 function showPanel(id, btn) {
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
-  document.querySelectorAll('.tab').forEach(t => { t.classList.remove('active'); t.classList.remove('active-amber'); });
+  document.querySelectorAll('.tab').forEach(t => {
+    t.classList.remove('active','active-amber','active-cyan');
+  });
   document.getElementById(id).classList.add('active');
   if (id === 'socket-mgmt') btn.classList.add('active-amber');
+  else if (id === 'normalization') btn.classList.add('active-cyan');
   else btn.classList.add('active');
 }
 </script>

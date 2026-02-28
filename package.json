@@ -1,6 +1,6 @@
 {
   "name": "cognigy-a2a-gateway",
-  "version": "1.0.0",
+  "version": "0.1.1",
   "description": "A2A Protocol gateway bridging external A2A consumers to Cognigy.AI REST and Socket endpoints",
   "main": "dist/index.js",
   "scripts": {

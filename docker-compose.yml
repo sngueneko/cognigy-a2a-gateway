@@ -28,6 +28,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      platforms:
+        - linux/amd64
+        - linux/arm64
     image: cognigy-a2a-gateway:latest
     container_name: cognigy-a2a-gateway
     restart: unless-stopped
@@ -78,6 +81,9 @@ services:
     build:
       context: ../webchat-ui
       dockerfile: ../webchat-ui/Dockerfile
+      platforms:
+        - linux/amd64
+        - linux/arm64
     image: cognigy-a2a-webchat:latest
     container_name: cognigy-a2a-webchat
     restart: unless-stopped
